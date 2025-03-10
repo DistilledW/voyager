@@ -6,7 +6,7 @@ train/submodules/Depth-Anything-V2/
 *__pycache__/
 *.pyc
 .vscode
-*/output
+output/
 build/
 *tensorboard_3d
 *screenshots
