@@ -1,0 +1,21 @@
+# ninja log v5
+1	3993	1735100315225664731	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/forward.o	dfddd38a088ad9af
+0	4033	1735100315264663692	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/backward.o	e0530ee6f4b9c0bd
+1	13120	1735100324342423396	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	bff787d8503c5ebb
+2	16624	1735100327838331626	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/ext.o	326de178444d3769
+3	52137	1735100363326423615	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/rasterize_points.o	faff1a1730205adf
+16	3648	1735282558989213348	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/backward.o	76972240b6d8667a
+16	3878	1735282559219215928	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/forward.o	214b7b11b0f92c7e
+17	10780	1735282566112293240	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	d12fe402b6c13de8
+17	15001	1735282570323340449	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/ext.o	d9bdc8c287169b70
+18	48179	1735282603475711576	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/rasterize_points.o	56cb0ed317fbaa1c
+19	3864	1736578443929787035	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/forward.o	dfddd38a088ad9af
+18	3924	1736578443989787073	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/backward.o	e0530ee6f4b9c0bd
+19	11585	1736578451642791852	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	bff787d8503c5ebb
+20	15084	1736578455134794001	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/ext.o	326de178444d3769
+21	49199	1736578489223813960	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/rasterize_points.o	faff1a1730205adf
+73	4521	1736931764661413363	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/forward.o	214b7b11b0f92c7e
+72	4661	1736931764801413318	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/backward.o	76972240b6d8667a
+73	12515	1736931772645410806	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	d12fe402b6c13de8
+74	15812	1736931775936409744	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/ext.o	d9bdc8c287169b70
+75	48228	1736931808326399057	/workspace/code/h-3dgs-train/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/rasterize_points.o	56cb0ed317fbaa1c
