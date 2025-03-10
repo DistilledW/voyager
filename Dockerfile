@@ -66,7 +66,7 @@ RUN conda run -n 3dgs pip install plyfile tqdm joblib exif scikit-learn timm==0.
 WORKDIR /workspace
 
 # 常用软件 
-RUN apt-get update && apt-get install -y tree 
+RUN apt-get update && apt-get install -y tree inetutils-ping
 #     && apt-get install -y net-tools \
 #     && apt-get install -y nginx \
 #     && apt-get install -y redis-server \
