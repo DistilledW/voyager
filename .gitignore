@@ -6,11 +6,12 @@ train/submodules/Depth-Anything-V2/
 *__pycache__/
 *.pyc
 .vscode
-*output
-*build
+*/output
+build/
 *tensorboard_3d
 *screenshots
 requirements.txt
 LICENSE_h-3dgs.md
 videoProcess/
 delete
+docker_run.sh

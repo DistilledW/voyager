@@ -1,5 +1,5 @@
-PROJECT_DIR=/data/zliu/docker_3dgs
-DATA_DIR=/home/zliu/project_3dgs/webGS
+PROJECT_DIR=/home/zliu/project/webGS
+DATA_DIR=/data/zliu/docker_3dgs
 IMAGE_NAME=webgs
 IMAGE_VERSION=v0
 IMAGE_NEXT_VERSION=v1
@@ -10,7 +10,7 @@ docker run -it --rm \
     --shm-size=16g \
     --gpus all \
     --network host \
-    -v ${PROJECT_DIR}:/workspace/data -v ${DATA_DIR}:/workspace/code \
+    -v ${DATA_DIR}:/workspace/data -v ${PROJECT_DIR}:/workspace/code \
     --name ${CONTAINER} \
     ${IMAGE_NAME}:${IMAGE_VERSION} bash 
 

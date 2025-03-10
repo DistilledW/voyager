@@ -326,16 +326,14 @@ if __name__ == "__main__":
     parser.add_argument('--client', type=int, default=1) 
     args = parser.parse_args(sys.argv[1:]) 
     dataset, pipe = lp.extract(args), pp.extract(args) 
-    # print("Rendering " + args.model_path) 
     mp.set_start_method("spawn", force=True) 
-    print(mp.get_start_method()) 
 
     # server 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
     server_socket.bind((args.ip, args.port)) 
     server_socket.listen(args.client) 
-    print(f"Server listening on {args.ip}:{args.port}, while the number of client equals {args.client}\n") 
     manager = mp.Manager() 
+    print(f"Server listening on {args.ip}:{args.port}, while the number of client equals {args.client}\n") 
     
     # while True: 
     for i in range(1): 
