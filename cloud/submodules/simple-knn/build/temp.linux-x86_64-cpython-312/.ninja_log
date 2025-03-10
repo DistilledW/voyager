@@ -1,7 +1,0 @@
-# ninja log v5
-1	11652	1735100378224054776	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/simple_knn.o	676a611929d7b640
-0	15119	1735100381683970124	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/ext.o	a608e17389e39fab
-1	48497	1735100415036172938	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/spatial.o	ae583fd4bece3bb7
-20	11114	1735282617872872457	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/simple_knn.o	d2cab8a5632b288a
-20	14583	1735282621332911096	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/ext.o	6c73c0f26f58b883
-21	47744	1735282654470280670	/workspace/code/h-3dgs-train/submodules/simple-knn/build/temp.linux-x86_64-cpython-312/spatial.o	6b0e650de91f8bc3
