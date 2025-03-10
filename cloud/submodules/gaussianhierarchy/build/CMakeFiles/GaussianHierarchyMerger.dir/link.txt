@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -rdynamic CMakeFiles/GaussianHierarchyMerger.dir/mainHierarchyMerger.cpp.o -o GaussianHierarchyMerger   -L/usr/local/cuda/targets/x86_64-linux/lib  libGaussianHierarchy.a -lcudadevrt -lcudart_static -lrt -lpthread -ldl 
