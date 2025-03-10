@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -rdynamic CMakeFiles/GaussianHierarchyCreator.dir/mainHierarchyCreator.cpp.o -o GaussianHierarchyCreator   -L/usr/local/cuda/targets/x86_64-linux/lib  libGaussianHierarchy.a -lcudadevrt -lcudart_static -lrt -lpthread -ldl 
