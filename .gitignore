@@ -1,3 +1,14 @@
 dataset/
 cloud/submodules/DPT/
 cloud/submodules/Depth-Anything-V2/
+train/submodules/DPT/
+train/submodules/Depth-Anything-V2/
+*__pycache__/
+*.pyc
+.vscode
+*output
+*build
+*tensorboard_3d
+*screenshots
+requirements.txt
+LICENSE_h-3dgs.md
