@@ -504,7 +504,48 @@ void Switching::getTsIndexed(
 		ts); // , kids
 		
 }
-__global__ void expand_markNodesForSize(int N, Box* c_boxes, Box*p_boxes, int threshold, Point* viewpoint, Point zdir, bool if_culling, GSPlane* frustum_plans, bool* leafs_tag, int* last_frame, int* render_counts)
+__forceinline__ __device__ float3 tPoint4x3(const float3& p, const float* matrix)
+{
+	float3 transformed = {
+		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
+		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
+		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
+	};
+	return transformed;
+}
+
+__forceinline__ __device__ float4 tPoint4x4(const float3& p, const float* matrix)
+{
+	float4 transformed = {
+		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
+		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
+		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
+		matrix[3] * p.x + matrix[7] * p.y + matrix[11] * p.z + matrix[15]
+	};
+	return transformed;
+}
+
+__forceinline__ __device__ bool in_frustum(
+	float3 p_orig,
+	const float* viewmatrix,
+	const float* projmatrix)
+{
+	// float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+
+	// Bring points to screen space
+	float4 p_hom = tPoint4x4(p_orig, projmatrix);
+	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+	float3 p_view = tPoint4x3(p_orig, viewmatrix);
+
+	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
+	{
+		return false;
+	}
+	return true;
+}
+
+__global__ void expand_markNodesForSize(int N, Box* c_boxes, Box*p_boxes, float* means3d, int threshold, Point* viewpoint, Point zdir, bool if_culling, float* view_transform, float*  projection_matrix, bool* leafs_tag, int* last_frame, int* render_counts)
 {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= N) 
@@ -514,31 +555,18 @@ __global__ void expand_markNodesForSize(int N, Box* c_boxes, Box*p_boxes, int th
 	// 视锥检查，过滤掉所有在视锥外的点
 	Box box = c_boxes[curr_idx];
 	if (if_culling){
-		for(int i = 0; i < 6; ++i){
-			GSPlane& plane = frustum_plans[i];
-			bool allOutSide = true;
-			for (int j = 0; j < 8; ++j){ 
-				float x = (j & 1 == 0) ? box.minn.xyz[0] : box.maxx.xyz[0] ;
-				float y = (j & 2 == 0) ? box.minn.xyz[1] : box.maxx.xyz[1] ;
-				float z = (j & 4 == 0) ? box.minn.xyz[2] : box.maxx.xyz[2] ;
-				float dist = x * plane.x + y * plane.y + z * plane.z + plane.d;
-				if (dist < 0){ 
-					allOutSide = false;
-					break;
-				}
-			}
-			if(allOutSide){
-				render_counts[idx] = 0;
-				return ;
-			}
-		} 
+		float3 p_orig = { means3d[3 * idx], means3d[3 * idx + 1], means3d[3 * idx + 2] };
+		if (!in_frustum(p_orig, view_transform, projection_matrix)){
+			render_counts[idx] = 0;
+			return ;
+		}
 	}
 	float size = computeSizeGPU(c_boxes[curr_idx], *viewpoint, zdir);	// child size
 	if (size >= threshold){
-		// if (leafs_tag[curr_idx]){
+		if (leafs_tag[curr_idx]){
 			render_counts[curr_idx] = 1;
 			last_frame[curr_idx] = 0;
-		// }
+		}
 	}else {
 		float p_size = computeSizeGPU(p_boxes[curr_idx], *viewpoint, zdir);	// parent size
 		if(p_size >= threshold){
@@ -579,12 +607,14 @@ int Switching::forceSearch(
 	int N, 						// point number
 	float* c_boxes, 			// children's boxes
 	float* p_boxes, 			// parents' boxes
+	float* means3d, 
 	float threshold, 			// target size
 	float* viewpoint,
 	float x, float y, float z,
-	float* frustum_plans, 		// 视锥平面 
-	bool* leafs_tag, 
 	bool if_culling,
+	float* view_transform,
+	float* projection_matrix,	
+	bool* leafs_tag, 
 	// Output 
 	int* last_frame,			// 上一次用到该 gs point有多久。
 	int* render_indices, 
@@ -596,8 +626,8 @@ int Switching::forceSearch(
 	thrust::device_vector<int> render_offsets(N);
 	Point zdir = { x, y, z };
 	int num_blocks = (N + 255) / 256;
-	expand_markNodesForSize << <num_blocks, 256 >> > (N, (Box*)c_boxes, (Box*)p_boxes, threshold, (Point*)viewpoint, zdir, if_culling, (GSPlane*)frustum_plans, 
-		(bool*)leafs_tag, last_frame, render_counts.data().get());
+	expand_markNodesForSize << <num_blocks, 256 >> > (N, (Box*)c_boxes, (Box*)p_boxes, means3d, threshold, (Point*)viewpoint, zdir, if_culling, \
+		view_transform, projection_matrix, (bool*)leafs_tag, last_frame, render_counts.data().get());
 	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
 	temp_storage.resize(temp_storage_bytes);
 	cub::DeviceScan::InclusiveSum(temp_storage.data().get(), temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);

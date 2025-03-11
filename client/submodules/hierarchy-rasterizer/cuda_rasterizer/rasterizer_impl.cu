@@ -240,7 +240,6 @@ int CudaRasterizer::Rasterizer::forward(
 	cudaStream_t stream = (cudaStream_t)streamy;
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
-
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -326,7 +325,6 @@ int CudaRasterizer::Rasterizer::forward(
 
 	if (*num_rendered == 0)
 		return 0;
-
 	size_t binning_chunk_size = required<BinningState>(*num_rendered);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, *num_rendered);

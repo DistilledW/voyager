@@ -29,12 +29,14 @@ public:
 		int N, 						// point number
 		float* c_boxes, 			// children's boxes
 		float* p_boxes, 			// parents' boxes
+		float* means3d, 
 		float threshold, 			// target size
 		float* viewpoint,
 		float x, float y, float z,
-		float* frustum_plans, 		// 视锥平面 
+		bool if_culling,			// frustum culling 
+		float* view_transform,
+		float* projection_matrix,	
 		bool* leafs_tag, 
-		bool if_culling,
 		// Output 
 		int* last_frame,			// 上一次用到该 gs point有多久。
 		int* render_indices, 

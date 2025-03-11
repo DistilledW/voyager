@@ -23,12 +23,14 @@ ExpandToTarget(torch::Tensor& nodes, int target);
 int ForceSearch(
 	torch::Tensor& child_boxes, 
 	torch::Tensor& parent_boxes, 
+	torch::Tensor& child_means3D, 
 	float threshold, 
 	torch::Tensor& viewpoint, 
-	torch::Tensor& viewdir, 
-	torch::Tensor& frustum_plans,
-	torch::Tensor& leafs_tag,
 	bool if_culling,
+	torch::Tensor& view_transform,
+	torch::Tensor& projection_matrix,
+	torch::Tensor& viewdir, 
+	torch::Tensor& leafs_tag,
 	// output:
 	torch::Tensor& last_frame,
 	torch::Tensor& render_indices,

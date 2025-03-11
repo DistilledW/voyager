@@ -176,9 +176,9 @@ class client:
     @torch.no_grad()
     def render(self, end_signal, send_start_signal, queue, camera_queue, dataset, pipe, args):
         # create output folder if it doesn't exit  
-        if not os.path.exists(args.out_dir):
-            os.makedirs(args.out_dir)
-            print(f"Create folder {args.out_dir}.")
+        if not os.path.exists(args.render_dir):
+            os.makedirs(args.render_dir)
+            print(f"Create folder {args.render_dir}.")
         torch.cuda.init() 
         torch.cuda.set_device(torch.cuda.current_device())
         # 第一帧数据作为起始数据 
@@ -216,7 +216,7 @@ class client:
         nodes_for_render_indices = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda() 
         interpolation_weights = torch.zeros(child_means3D.size(0), dtype=torch.float32).cuda() 
         last_frame = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda()
-        frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
+        # frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
 
         # Evaluation 
         rectified_data_dir = os.path.join(args.test_data_dir, "camera_calibration/rectified")
@@ -231,8 +231,6 @@ class client:
             log_path = os.path.join(args.logs_dir, "culling", f"{self.shared_data['tau']}.log")
         else:
             log_path = os.path.join(args.logs_dir, "original", f"{self.shared_data['tau']}.log")
-        with open(log_path, "w") as fout:
-            pass 
 
         send_start_signal.set() 
         while not end_signal.is_set(): 
@@ -258,6 +256,7 @@ class client:
                 break 
             overTime = 0 
             viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
+            viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
             viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
             viewpoint.camera_center = viewpoint.camera_center.cuda() 
             frame_index += 1 
@@ -265,33 +264,26 @@ class client:
             tanfovx = math.tan(viewpoint.FoVx * 0.5) 
             tanfovy = math.tan(viewpoint.FoVy * 0.5) 
             threshold = (2 * (self.shared_data["tau"] + 0.5)) * tanfovx / (0.5 * viewpoint.image_width) 
-            # 将投影矩阵转变为6个视锥平面 这个目前测试出来对于精度影响挺大的，还需要看看
-            frustum_plans[0, :] = (viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[0, :]) # 左 
-            frustum_plans[1, :] = (viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[0, :]) # 右 
-            frustum_plans[2, :] = (viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[1, :]) # 下
-            frustum_plans[3, :] = (viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[1, :]) # 上
-            frustum_plans[4, :] = (viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[2, :]) # 近
-            frustum_plans[5, :] = (viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[2, :]) # 远
-            norm = torch.norm(frustum_plans[:, :3], dim=1, keepdim=True)
-            frustum_plans /= norm 
             # print("force_search") 
             to_render = force_search( 
                 child_boxes, 
-                parent_boxes,
-                threshold,
+                parent_boxes, 
+                child_means3D, 
+                threshold, 
                 viewpoint.camera_center, 
-                torch.zeros((3)), 
-                frustum_plans,
-                leafs_tag,
                 args.with_culling, 
+                viewpoint.world_view_transform, 
+                viewpoint.projection_matrix, 
+                torch.zeros((3)), 
+                leafs_tag, 
                 # output 
-                last_frame,
-                render_indices,
+                last_frame, 
+                render_indices, 
                 interpolation_weights) 
-            # print("out of force_search:: ", to_render, threshold, viewpoint.camera_center) 
+            # print("out of force_search:: ", to_render) 
             # 3. render 
             # 计算插值 
-            indices = render_indices[:to_render].int().contiguous() # [indices].int().contiguous()
+            indices = render_indices[:to_render].int().contiguous() 
             num_node_kids = torch.cat([num_siblings, torch.ones(sky_box_means3d.size(0), dtype=torch.int).cuda()], dim = 0)
             interps = interpolation_weights[:to_render].unsqueeze(1) 
             interps_inv = (1 - interpolation_weights[:to_render]).unsqueeze(1) 
@@ -330,7 +322,7 @@ class client:
                 interpolation_weights=interpolation_weights,
                 num_node_kids = num_node_kids, 
                 do_depth=False 
-            )
+            ) 
             rasterizer = GaussianRasterizer(raster_settings=raster_settings)
             image, _, _ = rasterizer( 
                 means3D = means3d,
@@ -349,10 +341,10 @@ class client:
             gt_image = gt_image.permute(2, 0, 1)
             
             # try:
-            #     torchvision.utils.save_image(image, os.path.join(args.out_dir, viewpoint.image_name.split(".")[0] + ".png"))
+            #     torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
             # except:
-            #     os.makedirs(os.path.dirname(os.path.join(args.out_dir, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
-            #     torchvision.utils.save_image(image, os.path.join(args.out_dir, viewpoint.image_name.split(".")[0] + ".png"))
+            #     os.makedirs(os.path.dirname(os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
+            #     torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
             image *= alpha_mask 
             gt_image *= alpha_mask 
             psnr_test_ = psnr(image, gt_image).mean().double()
@@ -437,7 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--ip", type=str, default='10.147.18.182') 
     parser.add_argument('--port', type=int, default=50000) 
     parser.add_argument("--with_culling", type=bool, default=True)
-    parser.add_argument('--out_dir', type=str, default="") 
+    parser.add_argument('--render_dir', type=str, default="") 
     parser.add_argument("--save_log", type=bool, default=False)
     parser.add_argument("--logs_dir", type=str, default="")
     parser.add_argument("--test_data_dir", type=str, default="")
