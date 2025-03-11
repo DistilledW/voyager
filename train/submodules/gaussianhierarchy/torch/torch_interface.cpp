@@ -82,8 +82,7 @@ torch::Tensor& viewpoint,
 torch::Tensor& viewdir, 
 torch::Tensor& render_indices,
 torch::Tensor& parent_indices,
-torch::Tensor& nodes_for_render_indices, 
-torch::Tensor& frustum_plans)
+torch::Tensor& nodes_for_render_indices)
 {
 	return Switching::expandToSize(
 	nodes.size(0), 
@@ -95,8 +94,7 @@ torch::Tensor& frustum_plans)
 	render_indices.contiguous().data_ptr<int>(),
 	nullptr,
 	parent_indices.contiguous().data_ptr<int>(),
-	nodes_for_render_indices.contiguous().data_ptr<int>(),
-	frustum_plans.contiguous().data_ptr<float>());
+	nodes_for_render_indices.contiguous().data_ptr<int>())
 }
 
 void GetTsIndexed(

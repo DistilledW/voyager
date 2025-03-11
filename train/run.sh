@@ -2,7 +2,7 @@ DATASET=/workspace/data/small_city
 ALIGNED=${DATASET}/camera_calibration/aligned 
 CHUNKS=${DATASET}/camera_calibration/chunks 
 OUTPUT=${DATASET}/output 
-RENDER_DIR=${DATASET}/renders/241226_01 
+RENDER_DIR=${DATASET}/renders/250311 
 RECTIFIED=../rectified 
 
 python render_hierarchy.py \

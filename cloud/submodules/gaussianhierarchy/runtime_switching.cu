@@ -498,42 +498,63 @@ void Switching::getTsIndexed(
 	int num_blocks = (N + 255) / 256;
 	computeTsIndexed<<<num_blocks, 256, 0, (cudaStream_t)stream >>>((Node*)nodes, (Box*)boxes, N, indices, cam, zdir, target_size, ts, kids);
 }
+__forceinline__ __device__ float3 tPoint4x3(const float3& p, const float* matrix)
+{
+	float3 transformed = {
+		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
+		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
+		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
+	};
+	return transformed;
+}
 
-__global__ void expandToSize_markNodesForSize(int N, Node* nodes, Box* boxes, float threshold, Point* viewpoint, Point zdir,  
-	int frame_index, int window_size, GSPlane* frustum_plans, int* last_frame, int* render_counts) 
+__forceinline__ __device__ float4 tPoint4x4(const float3& p, const float* matrix)
+{
+	float4 transformed = {
+		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
+		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
+		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
+		matrix[3] * p.x + matrix[7] * p.y + matrix[11] * p.z + matrix[15]
+	};
+	return transformed;
+}
+
+__forceinline__ __device__ bool frustum_culling(
+	float3 p_orig,
+	const float* viewmatrix,
+	const float* projmatrix)
+{
+	float4 p_hom = tPoint4x4(p_orig, projmatrix);
+	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+	float3 p_view = tPoint4x3(p_orig, viewmatrix);
+
+	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
+	{
+		return false;
+	}
+	return true;
+}
+
+__global__ void expandToSize_markNodesForSize(int N, Node* nodes, Box* boxes, float* means3D, float threshold, Point* viewpoint, Point zdir,  
+	int frame_index, int window_size, float* world_view_transform, float* projection_matrix, int* last_frame, int* render_counts) 
 {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= N)
 		return;
 
 	Node node = nodes[idx];
-	if (last_frame[idx] >= frame_index - window_size || ((node.count_leafs + node.count_merged) != 1)){
+	int index = node.start;
+	float3 p_orig = { means3D[3 * index], means3D[3 * index + 1], means3D[3 * index + 2] };
+	bool ret = frustum_culling(p_orig, world_view_transform, projection_matrix);
+	// 视锥检查	
+	if (last_frame[idx] >= frame_index - window_size || ((node.count_leafs + node.count_merged) != 1) || !ret){
 		render_counts[idx] = 0;
-		last_frame[idx] = frame_index; // 更新 
+		if (ret)
+			last_frame[idx] = frame_index; // 更新 
 		return ;
 	} 
-	
-	// 视锥检查
 	Box box = boxes[idx];
-	// for(int i = 0; i < 6; ++i){
-	// 	GSPlane& plane = frustum_plans[i];
-	// 	bool allOutSide = true;
-	// 	for (int j = 0; j < 8; ++j){ 
-	// 		float x = (j & 1 == 0) ? box.minn.xyz[0] : box.maxx.xyz[0];
-	// 		float y = (j & 2 == 0) ? box.minn.xyz[1] : box.maxx.xyz[1];
-	// 		float z = (j & 4 == 0) ? box.minn.xyz[2] : box.maxx.xyz[2];
-	// 		float dist = x * plane.x + y * plane.y + z * plane.z + plane.d;
-	// 		if (dist > 0){ 
-	// 			allOutSide = false;
-	// 			break;
-	// 		}
-	// 	}
-	// 	if(allOutSide){
-	// 		render_counts[idx] = 0;
-	// 		return ;
-	// 	}
-	// }
-
 	float size = computeSizeGPU(box, *viewpoint, zdir);
 	int count = 0;
 	if (size >= threshold) 
@@ -547,11 +568,12 @@ __global__ void expandToSize_markNodesForSize(int N, Node* nodes, Box* boxes, fl
 				count += node.count_merged;
 		} 
 	} 
-	if(count > 0){
-		render_counts[idx] = count;
-		last_frame[idx] = frame_index;
-	}
-}
+	if(count > 0){ 
+		render_counts[idx] = count; 
+		last_frame[idx] = frame_index; 
+	} 
+} 
+
 __global__ void expandToSize_putRenderIndices(int N, Node* nodes, int* child_indices, int* parent_indices, 
 	int* child_box_indices, int* parent_box_indices, bool* leafs_tag, int* num_siblings, int* render_counts, int* render_offsets)
 {
@@ -572,11 +594,13 @@ int Switching::expandToSize(
 	int N, 
 	int* nodes, 
 	float* boxes, 
+	float* means3D, 
 	float threshold, 
 	float* viewpoint, 
 	float x, float y, float z, 
 	int frame_index, int window_size, 
-	float* frustum_plans, 
+	float* world_view_transform, 
+	float* projection_matrix, 
 	// list for clients 
 	int* last_frame, 
 	int* child_indices, 
@@ -586,27 +610,33 @@ int Switching::expandToSize(
 	bool* leafs_tag,
 	int* num_siblings) 
 {
-	// printf("start expand ----------------------------------------------------------\n");
+	// printf("start expand ---------------------------------------------------------- \n");
 	// fflush(stdout);
-	size_t temp_storage_bytes;
-
-	thrust::device_vector<char> temp_storage;
-	thrust::device_vector<int> render_counts(N);
-	thrust::device_vector<int> render_offsets(N);
+	size_t temp_storage_bytes = 0;
+	void* d_temp_storage = nullptr;
+	int* render_counts = nullptr;
+	int* render_offsets = nullptr;
+	cudaError_t err_1 = cudaMalloc((void**)&render_counts, N * sizeof(int));
+	cudaError_t err_2 = cudaMalloc((void**)&render_offsets, N * sizeof(int));
+	if (err_1 != cudaSuccess || err_2 != cudaSuccess)
+		printf("cudaMalloc failed: %s, %s\n", cudaGetErrorString(err_1), cudaGetErrorString(err_2));
 	Point zdir = { x, y, z };
 	int num_blocks = (N + 255) / 256;
-	expandToSize_markNodesForSize << <num_blocks, 256 >> > (N, (Node*)nodes, (Box*)boxes, threshold, (Point*)viewpoint, zdir, 
-		frame_index, window_size, (GSPlane*)frustum_plans, last_frame, render_counts.data().get());
-
-	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
-	temp_storage.resize(temp_storage_bytes);
-	cub::DeviceScan::InclusiveSum(temp_storage.data().get(), temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
-
+	expandToSize_markNodesForSize << <num_blocks, 256 >> > (N, (Node*)nodes, (Box*)boxes, means3D, threshold, (Point*)viewpoint, zdir, 
+		frame_index, window_size, world_view_transform, projection_matrix, last_frame, render_counts);
+	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts, render_offsets, N);
+	cudaError_t err = cudaMalloc(&d_temp_storage, temp_storage_bytes);
+	if (err != cudaSuccess)
+		std::cout<<"cudaMalloc failed: "<<cudaGetErrorString(err)<<std::endl;
+	cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, render_counts, render_offsets, N);
 	expandToSize_putRenderIndices << <num_blocks, 256 >> > (N, (Node*)nodes, child_indices, parent_indices, 
-		child_box_indices, parent_box_indices, leafs_tag, num_siblings, render_counts.data().get(), render_offsets.data().get());
-	
+		child_box_indices, parent_box_indices, leafs_tag, num_siblings, render_counts, render_offsets);
+
 	int point_count = 0;
-	cudaMemcpy(&point_count, render_offsets.data().get() + N - 1, sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(&point_count, &(render_offsets[N-1]), sizeof(int), cudaMemcpyDeviceToHost);
+	cudaFree(d_temp_storage);
+	cudaFree(render_counts);
+	cudaFree(render_offsets);
 	return point_count;
 }
 

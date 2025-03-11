@@ -186,7 +186,7 @@ class server:
         point_number = scene.gaussians._xyz.size(0) 
         box_number = scene.gaussians.boxes.size(0) 
         # tag 
-        frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
+        # frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
         last_frame = torch.full((point_number, ), -999, dtype=torch.int).cuda() # last frame index 
         child_indices = torch.zeros(point_number, dtype=torch.int).cuda()       # child index 
         parent_indices = torch.zeros(point_number, dtype=torch.int).cuda()      # parent index 
@@ -195,6 +195,7 @@ class server:
         leafs_tag = torch.zeros(box_number, dtype=torch.bool).cuda()            # whether child is leaf 
         num_siblings = torch.zeros(box_number, dtype = torch.int).cuda()        # the number of nodes' siblings 
         
+        search_means3D = scene.gaussians.get_xyz.cuda()
         means3D = scene.gaussians.get_xyz.cpu() # 高斯球的中心坐标 
         rotations = scene.gaussians.get_rotation.cpu() # 旋转角度 
         opacity = scene.gaussians.get_opacity.cpu() # opacity 
@@ -204,6 +205,8 @@ class server:
         torch.cuda.synchronize() 
         frame_index = 0 # 记录第几帧数据 
         window_size = 10 # 最近的帧数据 
+        with open("to_pass.txt", "w") as fout:
+            pass
         while not end_signal.is_set():
             viewpoint = None 
             try:
@@ -218,25 +221,21 @@ class server:
                 tanfovx = math.tan(viewpoint.FoVx * 0.5) 
                 threshold = (2 * (self.shared_data["tau"]  + 0.5)) * tanfovx / (0.5 * viewpoint.image_width)
                 viewpoint.camera_center = viewpoint.camera_center.cuda() 
+                viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
+                viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
                 viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
-                # 将投影矩阵转变为6个视锥平面 
-                frustum_plans[0, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[0, :]
-                frustum_plans[1, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[0, :]
-                frustum_plans[2, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[1, :]
-                frustum_plans[3, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[1, :]
-                frustum_plans[4, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[2, :]
-                frustum_plans[5, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[2, :]
-                for i in range(6):
-                    frustum_plans[i, :] = frustum_plans[i, :] / torch.norm(frustum_plans[i, :])
+                # print("expand to size") 
                 to_pass = expand_to_size( 
                     scene.gaussians.nodes,      # nodes 
                     scene.gaussians.boxes,      # boxes 
+                    search_means3D,             # means 
                     threshold,                  # pixel size 
                     viewpoint.camera_center,    # viewpoint 
                     torch.zeros((3)),           # viewpoint dir 
                     frame_index,                # frame index 
                     window_size,                # window size 
-                    frustum_plans,              # frustum plans 
+                    viewpoint.world_view_transform, 
+                    viewpoint.projection_matrix, 
                     # list for clients 
                     last_frame,                 # last frame index 
                     child_indices,              # child index 
@@ -245,7 +244,9 @@ class server:
                     parent_box_indices,         # parent box index 
                     leafs_tag,                  # whether child is leaf 
                     num_siblings)               # the number of nodes' siblings 
-                print("to pass = ", to_pass, threshold, viewpoint.camera_center)
+                print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
+                with open("to_pass.txt", "a+") as fout:
+                    fout.write(f"frame_index = {frame_index}, {to_pass}\n") 
                 c_indices = child_indices[:to_pass].cpu().contiguous()
                 c_box_indices = child_box_indices[:to_pass].cpu().contiguous()
                 p_indices = parent_indices[:to_pass].cpu().contiguous()
@@ -314,7 +315,6 @@ class server:
         end_signal.wait()
         print("quit tree traversal.")
 
-# server_vecs = np.array([])
 if __name__ == "__main__":
     # Set up command line argument parser 
     parser = ArgumentParser(description="Rendering script parameters") 

@@ -35,8 +35,7 @@ public:
 		int* render_indices,
 		int* node_markers,
 		int* parent_indices = nullptr,
-		int* nodes_for_render_indices=nullptr,
-		float* frustum_plans = nullptr);
+		int* nodes_for_render_indices=nullptr);
 
 	static void getTsIndexed(
 		int N,

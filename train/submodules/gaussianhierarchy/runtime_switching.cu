@@ -505,7 +505,7 @@ void Switching::getTsIndexed(
 		ts, 
 		kids);
 }
-__global__ void markNodesForSize_2(Node* nodes, Box* boxes, int N, Point* viewpoint, Point zdir, float target_size, int* render_counts, int* node_markers, GSPlane* frustum_plans)
+__global__ void markNodesForSize_2(Node* nodes, Box* boxes, int N, Point* viewpoint, Point zdir, float target_size, int* render_counts, int* node_markers)
 {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= N)
@@ -514,25 +514,6 @@ __global__ void markNodesForSize_2(Node* nodes, Box* boxes, int N, Point* viewpo
 	int node_id = idx;
 	Node node = nodes[node_id];
 	float size = computeSizeGPU(boxes[node_id], *viewpoint, zdir);
-	Box box = boxes[node_id];
-	// for(int i = 0; i < 6; ++i){
-	// 	GSPlane& plane = frustum_plans[i];
-	// 	bool allOutSide = true;
-	// 	for (int j = 0; j < 8; ++j){ 
-	// 		float x = (j & 1 == 0) ? box.minn.xyz[0] : box.maxx.xyz[0];
-	// 		float y = (j & 2 == 0) ? box.minn.xyz[1] : box.maxx.xyz[1];
-	// 		float z = (j & 4 == 0) ? box.minn.xyz[2] : box.maxx.xyz[2];
-	// 		float dist = x * plane.x + y * plane.y + z * plane.z + plane.d;
-	// 		if (dist < 0){ 
-	// 			allOutSide = false;
-	// 			break;
-	// 		}
-	// 	}
-	// 	if(allOutSide){
-	// 		render_counts[node_id] = 0;
-	// 		return ;
-	// 	}
-	// } 
 
 	int count = 0;
 	if (size >= target_size)
@@ -565,8 +546,7 @@ int Switching::expandToSize(
 	int* render_indices,
 	int* node_markers,
 	int* parent_indices,
-	int* nodes_for_render_indices,
-	float* frustum_plans)
+	int* nodes_for_render_indices)
 {
 	size_t temp_storage_bytes;
 	thrust::device_vector<char> temp_storage;
@@ -576,7 +556,7 @@ int Switching::expandToSize(
 	Point zdir = { x, y, z };
 
 	int num_blocks = (N + 255) / 256;
-	markNodesForSize_2 << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers, (GSPlane*)frustum_plans);
+	markNodesForSize_2 << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers);
 
 	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
 	temp_storage.resize(temp_storage_bytes);

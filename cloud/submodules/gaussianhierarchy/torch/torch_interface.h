@@ -23,11 +23,14 @@ ExpandToTarget(torch::Tensor& nodes, int target);
 int ExpandToSize(
 	torch::Tensor& nodes, 
 	torch::Tensor& boxes, 
+	torch::Tensor& means3D, 
 	float threshold, 
 	torch::Tensor& viewpoint, 
 	torch::Tensor& viewdir, 
 	int frame_index, int window_size,
-	torch::Tensor& frustum_plans, 
+	torch::Tensor& world_view_transform,
+	torch::Tensor& projection_matrix, 
+	// torch::Tensor& frustum_plans, 
 	// list for clients
 	torch::Tensor& last_frame, 
 	torch::Tensor& child_indices,

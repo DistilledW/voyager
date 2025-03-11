@@ -43,11 +43,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
     lpipss = 0.0 
 
     cameras = scene.getTestCameras() if eval else scene.getTrainCameras()
-    frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
     for viewpoint in tqdm(cameras):
-        # if viewpoint.image_name != "pass1_0000.jpg":
-        #     continue 
-        # print(viewpoint.image_name)
         viewpoint=viewpoint
         viewpoint.world_view_transform = viewpoint.world_view_transform.cuda()
         viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
@@ -55,18 +51,6 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
         viewpoint.camera_center = viewpoint.camera_center.cuda()
         tanfovx = math.tan(viewpoint.FoVx * 0.5)
         threshold = (2 * (tau + 0.5)) * tanfovx / (0.5 * viewpoint.image_width)
-        # frustum culling 
-        frustum_plans[0, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[0, :]
-        frustum_plans[1, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[0, :]
-        frustum_plans[2, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[1, :]
-        frustum_plans[3, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[1, :]
-        frustum_plans[4, :] = viewpoint.full_proj_transform[3, :] + viewpoint.full_proj_transform[2, :]
-        frustum_plans[5, :] = viewpoint.full_proj_transform[3, :] - viewpoint.full_proj_transform[2, :]
-        for i in range(6):
-            frustum_plans[i, :] = frustum_plans[i, :] / torch.norm(frustum_plans[i, :])
-        norm = torch.norm(frustum_plans[:, :3], dim=1, keepdim=True)
-        frustum_plans /= norm 
-
         to_render = expand_to_size(
             scene.gaussians.nodes,
             scene.gaussians.boxes,
@@ -75,8 +59,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             torch.zeros((3)),
             render_indices,
             parent_indices,
-            nodes_for_render_indices, 
-            frustum_plans)
+            nodes_for_render_indices)
         indices = render_indices[:to_render].int().contiguous() 
         node_indices = nodes_for_render_indices[:to_render].contiguous() 
         
