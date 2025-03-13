@@ -99,9 +99,9 @@ __global__ void duplicateWithKeys(
 		// and the value is the ID of the Gaussian. Sorting the values 
 		// with this key yields Gaussian IDs in a list, such that they
 		// are first sorted by tile and then by depth. 
-		for (int y = rect_min.y; y < rect_max.y; y++)
+		for (int y = rect_min.y; y < rect_max.y; y++) 
 		{
-			for (int x = rect_min.x; x < rect_max.x; x++)
+			for (int x = rect_min.x; x < rect_max.x; x++) 
 			{
 				uint64_t key = y * grid.x + x;
 				key <<= 32;
@@ -207,30 +207,31 @@ int CudaRasterizer::Rasterizer::forward(
 	const int P, int D, int M,
 	const float* background,
 	const int width, int height,
-	const int* indices,
-	const int* parent_indices,
+	const int* indices, const int* parent_indices, // empty 
+
 	const float* ts,
 	const int* kids,
 	const float* means3D,
 	const float* shs,
-	const float* colors_precomp,
+	const float* colors_precomp, // empty
 	const float* opacities,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
-	const float* cov3D_precomp,
-	const float* view_matrix,
-	const float* proj_matrix,
+
+	const float* cov3D_precomp, // empty
+
+	const float* view_matrix, const float* proj_matrix,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
-	const bool prefiltered,
+	const bool prefiltered, // False 
+
 	float* out_color,
-	float* depth,
+	float* depth, // nullptr
 	int* radii,
 	int* rects,
-	float* boxmin,
-	float* boxmax,
-	bool debug,
+	// nullptr, or False, or 0
+	float* boxmin, float* boxmax, bool debug,
 	int skyboxnum,
 	void* streamy,
 	int* num_rendered,
@@ -273,8 +274,8 @@ int CudaRasterizer::Rasterizer::forward(
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
 	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
-		indices,
-		parent_indices,
+		indices, parent_indices,
+
 		ts,
 		means3D,
 		(glm::vec3*)scales,
@@ -282,12 +283,11 @@ int CudaRasterizer::Rasterizer::forward(
 		(glm::vec4*)rotations,
 		opacities,
 		shs,
+
 		geomState.clamped,
 		geomState.p_clamped,
-		cov3D_precomp,
-		colors_precomp,
-		view_matrix,
-		proj_matrix,
+		cov3D_precomp, colors_precomp,
+		view_matrix, proj_matrix,
 		(glm::vec3*)cam_pos,
 		width, height,
 		focal_x, focal_y,
@@ -307,7 +307,7 @@ int CudaRasterizer::Rasterizer::forward(
 		skyboxnum,
 		stream,
 		biglimit,
-		on_cpu
+		on_cpu 
 	), debug);
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -323,15 +323,15 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(cudaMemcpyAsync(num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost, stream), debug);
 	cudaStreamSynchronize(stream);
 
-	if (*num_rendered == 0)
+	if (*num_rendered == 0) 
 		return 0;
 	size_t binning_chunk_size = required<BinningState>(*num_rendered);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, *num_rendered);
 
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
-	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + 255) / 256, 256, 0, stream >> > (
+	// and corresponding dublicated Gaussian indices to be sorted 
+	duplicateWithKeys << <(P + 255) / 256, 256, 0, stream >> > ( 
 		P,
 		geomState.means2D,
 		geomState.depths,
@@ -340,7 +340,7 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_unsorted,
 		radii,
 		tile_grid,
-		(int2*)rects
+		(int2*)rects 
 		);
 	CHECK_CUDA(, debug)
 
@@ -357,13 +357,12 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(cudaMemsetAsync(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2), stream), debug);
 
 	// Identify start and end of per-tile workloads in sorted list
-	if (*num_rendered > 0)
+	if (*num_rendered > 0) 
 		 identifyTileRanges << <(*num_rendered + 255) / 256, 256, 0, stream >> > (
 			*num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);
 	CHECK_CUDA(, debug)
-
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;

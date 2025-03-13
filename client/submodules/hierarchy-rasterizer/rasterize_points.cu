@@ -56,8 +56,8 @@ RasterizeGaussiansCUDA(
 	const int degree,
 	const torch::Tensor& campos,
 	const bool prefiltered,
-	const bool debug,
-	const bool do_depth)
+	const bool debug,	// False
+	const bool do_depth) // False
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
@@ -85,6 +85,7 @@ RasterizeGaussiansCUDA(
   torch::Tensor binningBuffer = torch::empty({0}, options.device(device));
   torch::Tensor imgBuffer = torch::empty({0}, options.device(device));
   torch::Tensor rects = torch::full({P, 2}, 0, means3D.options().dtype(torch::kInt32));
+
   std::function<char*(size_t)> geomFunc = resizeFunctional(geomBuffer);
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
@@ -99,14 +100,12 @@ RasterizeGaussiansCUDA(
       }
 
 	  rendered = CudaRasterizer::Rasterizer::forward(
-	    geomFunc,
-		binningFunc,
-		imgFunc,
-	    P, degree, M,
+	    geomFunc, binningFunc, imgFunc,
+	    P, degree, M, // 点数，颜色的degree
 		background.contiguous().data<float>(),
 		W, H,
-		indices.contiguous().data<int>(),
-		parent_indices.contiguous().data<int>(),
+		indices.contiguous().data<int>(), parent_indices.contiguous().data<int>(), // empty 
+
 		ts.contiguous().data<float>(),
 		kids.contiguous().data<int>(),
 		means3D.contiguous().data<float>(),
@@ -114,22 +113,20 @@ RasterizeGaussiansCUDA(
 		colors.contiguous().data<float>(), 
 		opacity.contiguous().data<float>(), 
 		scales.contiguous().data_ptr<float>(),
-		scale_modifier,
+		scale_modifier, // 1.0 
 		rotations.contiguous().data_ptr<float>(),
-		cov3D_precomp.contiguous().data<float>(), 
-		viewmatrix.contiguous().data<float>(), 
-		projmatrix.contiguous().data<float>(),
+
+		cov3D_precomp.contiguous().data<float>(), // empty
+
+		viewmatrix.contiguous().data<float>(), projmatrix.contiguous().data<float>(),
 		campos.contiguous().data<float>(),
-		tan_fovx,
-		tan_fovy,
-		prefiltered,
+		tan_fovx, tan_fovy,
+		prefiltered, // False 
 		out_color.contiguous().data<float>(),
 		out_invdepthptr,
 		radii.contiguous().data<int>(),
 		rects.contiguous().data<int>(),
-		nullptr,
-		nullptr,
-		debug);
+		nullptr, nullptr, debug);
   }
   return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_invdepth);
 }

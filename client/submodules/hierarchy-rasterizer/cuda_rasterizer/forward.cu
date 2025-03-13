@@ -27,14 +27,13 @@ __device__ glm::vec3 computeColorFromSH(int idx, int tidx, int deg, int max_coef
 	// The implementation is loosely based on code for 
 	// "Differentiable Point-Based Radiance Fields for 
 	// Efficient View Synthesis" by Zhang et al. (2022)
-	glm::vec3 pos = means[idx];
-	glm::vec3 dir = pos - campos;
-	dir = dir / glm::length(dir);
+	glm::vec3 pos = means[idx]; // means3d
+	glm::vec3 dir = pos - campos; dir = dir / glm::length(dir);
 
-	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs; 
-	glm::vec3 result = SH_C0 * sh[0];
+	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs; // shape = (16, 3), in which max coefficients equals 3. 
+	glm::vec3 result = SH_C0 * sh[0]; 
 
-	if (deg > 0)
+	if (deg > 0) // Always equals 3 
 	{
 		float x = dir.x;
 		float y = dir.y;
@@ -45,7 +44,7 @@ __device__ glm::vec3 computeColorFromSH(int idx, int tidx, int deg, int max_coef
 		{
 			float xx = x * x, yy = y * y, zz = z * z;
 			float xy = x * y, yz = y * z, xz = x * z;
-			result = result +
+			result = result + 
 				SH_C2[0] * xy * sh[4] +
 				SH_C2[1] * yz * sh[5] +
 				SH_C2[2] * (2.0f * zz - xx - yy) * sh[6] +
@@ -181,6 +180,7 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 rot, float* cov3D)
 {
 	// Create scaling matrix
+	// mod equals 1 
 	glm::mat3 S = glm::mat3(1.0f);
 	S[0][0] = mod * scale.x;
 	S[1][1] = mod * scale.y;
@@ -217,25 +217,24 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
-	const int* indices,
-	const int* parent_indices,
+	const int* indices, const int* parent_indices,
+
 	const float* ts,
-	const float* orig_points,
+	const float* orig_points, // mean3d
 	const glm::vec3* scales,
 	const float scale_modifier,
 	const glm::vec4* rotations,
 	const float* opacities,
 	const float* shs,
+
 	bool* clamped,
 	bool* clamped_p,
-	const float* cov3D_precomp,
-	const float* colors_precomp,
-	const float* viewmatrixs,
-	const float* projmatrixs,
+	const float* cov3D_precomp, const float* colors_precomp, // nullptr
+	const float* viewmatrixs, const float* projmatrixs,
 	const glm::vec3* cam_posp,
 	const int W, int H,
-	const float tan_fovx, float tan_fovy,
-	const float focal_x, float focal_y,
+	const float tan_fovx, float tan_fovy, 
+	const float focal_x, float focal_y, 
 	int* radii,
 	float2* points_xy_image,
 	float* depths,
@@ -248,7 +247,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	int2* rects,
 	float3 boxmin,
 	float3 boxmax,
-	int skyboxnum,
+	int skyboxnum, // 0
 	float biglimit,
 	MatMat viewmats,
 	MatMat projmats, 
@@ -260,16 +259,16 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	if (cam_posp != nullptr)
 		cam_pos = *cam_posp;
 
-	auto t_idx = cg::this_grid().thread_rank();
+	auto t_idx = cg::this_grid().thread_rank(); // target index 
 	if (t_idx >= P)
 		return;
 
 	bool sky = t_idx >= (P - skyboxnum);
-	int r_idx;
+	int r_idx; // reverse idx
 	if (sky)
 	{
 		r_idx = -(t_idx - (P - skyboxnum)) - 1;
-		parent_indices = nullptr; //Sky has no parents
+		parent_indices = nullptr; // Sky has no parents
 	}
 	else
 	{
@@ -287,7 +286,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Perform near culling, quit if outside.
 	float3 p_orig = { orig_points[3 * r_idx], orig_points[3 * r_idx + 1], orig_points[3 * r_idx + 2] };
 
-	if (parent_indices != nullptr)
+	if (parent_indices != nullptr) // nullptr
 	{
 		p_idx = parent_indices[t_idx];
 		if (p_idx == -1)
@@ -295,7 +294,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		else
 			t = ts[t_idx];
 	}
-
 	if (parent_indices != nullptr)
 	{
 		float3 pa_orig = { orig_points[3 * p_idx], orig_points[3 * p_idx + 1], orig_points[3 * p_idx + 2] };
@@ -307,13 +305,13 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		};
 	}
 
-	// Bring points to screen space
+	// Bring points to screen space 
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
 	float3 p_view = transformPoint4x3(p_orig, viewmatrix);
 
-	if (p_view.z <= 0.2f)
+	if (p_view.z <= 0.2f) // 筛点 
 		return;
 
 	if (p_orig.x < boxmin.x || p_orig.y < boxmin.y || p_orig.z < boxmin.z ||
@@ -358,7 +356,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	cov.z += h_var;
 	const float det_cov_plus_h_cov = cov.x * cov.z - cov.y * cov.y;
 
-#ifdef DGR_FIX_AA
+#ifdef DGR_FIX_AA // 抗锯齿修正 
 	const float h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
 #endif 
 
@@ -388,6 +386,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 	else // Slightly more aggressive, might need a math cleanup
 	{
+		// Choose this, get a rectangle to fix the gaussian ball 
 		const int2 my_rect = { (int)ceil(3.f * sqrt(cov.x)), (int)ceil(3.f * sqrt(cov.z)) };
 		rects[t_idx] = my_rect;
 		getRect(point_image, my_rect, rect_min, rect_max, grid);
@@ -398,8 +397,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
-	if (colors_precomp == nullptr)
-	{
+	if (colors_precomp == nullptr){
 		glm::vec3 result;
 		if (parent_indices == nullptr)
 		{
@@ -413,7 +411,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		rgb[t_idx * C + 0] = result.x;
 		rgb[t_idx * C + 1] = result.y;
 		rgb[t_idx * C + 2] = result.z;
-	}
+	} 
 
 	// Store some useful helper data for the next steps.
 	depths[t_idx] = p_view.z;
@@ -437,8 +435,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
 template <uint32_t CHANNELS>
-__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
-renderCUDA(
+__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y) 
+renderCUDA( 
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
@@ -453,7 +451,7 @@ renderCUDA(
 	float* __restrict__ out_color,
 	int P, int skyboxnum,
 	const float* __restrict__ depths,
-	float* __restrict__ invdepth)
+	float* __restrict__ invdepth) 
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -518,8 +516,7 @@ renderCUDA(
 			// Keep track of current position in range
 			contributor++;
 
-			// Resample using conic matrix (cf. "Surface 
-			// Splatting" by Zwicker et al., 2001)
+			// Resample using conic matrix (cf. "Surface Splatting" by Zwicker et al., 2001)
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
@@ -534,7 +531,7 @@ renderCUDA(
 			float my_alpha = min(0.99f, con_o.w * exp(power));
 			float alpha;
 			int coll_id = collected_id[j];
-			if (do_interp && coll_id < check)
+			if (do_interp && coll_id < check) 
 			{
 				float2 interp = collected_interp[j];
 				float kidsqrt_alpha = 1.0f - __powf(1.0f - my_alpha, interp.y);
@@ -559,7 +556,7 @@ renderCUDA(
 				C[ch] += features[coll_id * CHANNELS + ch] * alpha * T;
 
 			if(invdepth)
-			expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
+				expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
 
 			T = test_T;
 
@@ -583,7 +580,7 @@ renderCUDA(
 	}
 }
 
-void FORWARD::render(
+void FORWARD::render( 
 	const dim3 grid, dim3 block,
 	const uint2* ranges,
 	const uint32_t* point_list,
@@ -601,7 +598,7 @@ void FORWARD::render(
 	int skyboxnum,
 	cudaStream_t stream,
 	float* depths,
-	float* depth)
+	float* depth) 
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block, 0, stream >> > (
 		ranges,
@@ -625,8 +622,7 @@ void FORWARD::render(
 
 
 void FORWARD::preprocess(int P, int D, int M,
-	const int* indices,
-	const int* parent_indices,
+	const int* indices, const int* parent_indices, // nullptr
 	const float* ts,
 	const float* means3D,
 	const glm::vec3* scales,
@@ -662,8 +658,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool on_cpu)
 {
 	MatMat viewview, projproj;
-	if (on_cpu)
-	{
+	if (on_cpu){
 		for (int i = 0; i < 16; i++)
 		{
 			viewview.vals[i] = viewmatrix[i];
@@ -673,8 +668,7 @@ void FORWARD::preprocess(int P, int D, int M,
 
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256, 0, stream >> > (
 		P, D, M,
-		indices,
-		parent_indices,
+		indices, parent_indices,
 		ts,
 		means3D,
 		scales,

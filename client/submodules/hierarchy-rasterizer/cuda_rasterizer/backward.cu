@@ -777,8 +777,7 @@ void BACKWARD::preprocess(
 	// matrix gradients to scale and rotation.
 	preprocessCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
 		P, D, M,
-		indices,
-		parent_indices,
+		indices, parent_indices,
 		ts,
 		(float3*)means3D,
 		radii,

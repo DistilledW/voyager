@@ -284,19 +284,19 @@ class client:
             # 3. render 
             # 计算插值 
             indices = render_indices[:to_render].int().contiguous() 
-            num_node_kids = torch.cat([num_siblings, torch.ones(sky_box_means3d.size(0), dtype=torch.int).cuda()], dim = 0)
+            num_node_kids = torch.cat([num_siblings, torch.ones(sky_box_means3d.size(0), dtype=torch.int).cuda()], dim = 0) 
             interps = interpolation_weights[:to_render].unsqueeze(1) 
             interps_inv = (1 - interpolation_weights[:to_render]).unsqueeze(1) 
-            means3D_base = (interps * child_means3D[indices] + interps_inv * parent_means3D[indices]).contiguous()
-            scales_base = (interps * child_scales[indices] + interps_inv * parent_scales[indices]).contiguous()
-            shs_base = (interps.unsqueeze(2) * child_shs[indices] + interps_inv.unsqueeze(2) * parent_shs[indices]).contiguous()
-            opacity_base = (interps * child_opacity[indices] + interps_inv * parent_opacity[indices]).contiguous()
+            means3D_base = (interps * child_means3D[indices] + interps_inv * parent_means3D[indices]).contiguous() 
+            scales_base = (interps * child_scales[indices] + interps_inv * parent_scales[indices]).contiguous() 
+            shs_base = (interps.unsqueeze(2) * child_shs[indices] + interps_inv.unsqueeze(2) * parent_shs[indices]).contiguous() 
+            opacity_base = (interps * child_opacity[indices] + interps_inv * parent_opacity[indices]).contiguous() 
 
-            parents_rots = parent_rotations[indices]
-            child_rots = child_rotations[indices]
-            dots = torch.bmm(child_rots.unsqueeze(1), parents_rots.unsqueeze(2)).flatten()
+            parents_rots = parent_rotations[indices] 
+            child_rots = child_rotations[indices] 
+            dots = torch.bmm(child_rots.unsqueeze(1), parents_rots.unsqueeze(2)).flatten() 
             parents_rots[dots < 0] *= -1 
-            rotations_base = ((interps * child_rots) + interps_inv * parents_rots).contiguous()
+            rotations_base = ((interps * child_rots) + interps_inv * parents_rots).contiguous() 
 
             means3d = torch.cat([means3D_base, sky_box_means3d], dim = 0).contiguous() 
             scales = torch.cat([scales_base, sky_box_scales], dim = 0).contiguous() 
@@ -362,13 +362,13 @@ class client:
                 number_of_delete_points = child_means3D.size(0) 
                 # last_frame 中大于阈值的所有数据都剔除 
                 masks = last_frame < window_size 
-                # child 
-                child_means3D = child_means3D[masks].contiguous()
-                child_rotations = child_rotations[masks].contiguous()
-                child_opacity = child_opacity[masks].contiguous()
-                child_scales = child_scales[masks].contiguous() 
-                child_shs = child_shs[masks].contiguous() 
-                child_boxes = child_boxes[masks].contiguous() 
+                # child 136 * 4 = 544 Bytes * 20 k = 10.880 MB/s 没有压缩！ 
+                child_means3D = child_means3D[masks].contiguous() # 3
+                child_rotations = child_rotations[masks].contiguous() # 4 
+                child_opacity = child_opacity[masks].contiguous() # 1 
+                child_scales = child_scales[masks].contiguous() # 3
+                child_shs = child_shs[masks].contiguous() # 16 * 3 
+                child_boxes = child_boxes[masks].contiguous() # 4 * 2 
                 # parent 
                 parent_means3D = parent_means3D[masks].contiguous() 
                 parent_rotations = parent_rotations[masks].contiguous() 
@@ -377,8 +377,8 @@ class client:
                 parent_shs = parent_shs[masks].contiguous() 
                 parent_boxes = parent_boxes[masks].contiguous() 
                 # others 
-                leafs_tag = leafs_tag[masks].contiguous() 
-                num_siblings = num_siblings[masks].contiguous() 
+                leafs_tag = leafs_tag[masks].contiguous() # 1 
+                num_siblings = num_siblings[masks].contiguous() # 1 
                 
                 # 修改临时变量的长度: 
                 render_indices = render_indices[:child_means3D.size(0)].contiguous() 
@@ -397,7 +397,7 @@ class client:
             child_rotations = torch.cat([child_rotations, queue.get().cuda()], dim = 0)
             child_opacity  = torch.cat([child_opacity, queue.get().cuda()], dim = 0)
             child_scales  = torch.cat([child_scales, queue.get().cuda()], dim = 0)
-            child_shs  = torch.cat([child_shs, queue.get().cuda()], dim = 0)
+            child_shs  = torch.cat([child_shs, queue.get().cuda()], dim = 0) 
             child_boxes  = torch.cat([child_boxes, queue.get().cuda()], dim = 0)
             # parent 
             parent_means3D = torch.cat([parent_means3D, queue.get().cuda()], dim = 0)
