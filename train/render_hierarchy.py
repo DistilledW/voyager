@@ -104,15 +104,14 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
         # except:
         #     os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
         #     torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
-        
         if eval:
             image *= alpha_mask 
             gt_image *= alpha_mask 
             psnr_test += psnr(image, gt_image).mean().double() 
             ssims += ssim(image, gt_image).mean().double() 
             lpipss += lpips(image, gt_image, net_type='vgg').mean().double() 
-            # with open("render.log", "a") as fout:
-            #     fout.write(f"{viewpoint.image_name}: {psnr(image, gt_image).mean().double()}, {ssim(image, gt_image).mean().double()}, {lpips(image, gt_image, net_type='vgg').mean().double()}\n")
+            with open("../dataset/render.log", "a") as fout:
+                fout.write(f"{viewpoint.image_name}: {psnr(image, gt_image).mean().double()}, {ssim(image, gt_image).mean().double()}, {lpips(image, gt_image, net_type='vgg').mean().double()}\n")
 
         torch.cuda.empty_cache() 
     if eval and len(scene.getTestCameras()) > 0:

@@ -187,7 +187,7 @@ __global__ void changeNodesOnce(
 		int parent_node_id = node.parent;
 		if (parent_node_id != -1)
 		{
-			Node parent_node = nodes[parent_node_id];
+			// Node parent_node = nodes[parent_node_id];
 			float parent_size = computeSizeGPU(boxes[parent_node_id], *viewpoint, zdir);
 			if (parent_size < target_size) // collapse
 			{
@@ -252,7 +252,7 @@ __global__ void putRenderIndicesIndexed(Node* nodes, int N, int* node_indices, i
 	Node node = nodes[node_idx];
 	int count = render_counts[idx];
 	int offset = idx == 0 ? 0 : render_offsets[idx - 1];
-	int start = node.start;
+	// int start = node.start;
 
 	int parentgaussian = -1;
 	if (node.parent != -1)
@@ -269,7 +269,7 @@ __global__ void putRenderIndicesIndexed(Node* nodes, int N, int* node_indices, i
 
 	if (debug != nullptr)
 	{
-		Box box = boxes[node_idx];
+		// Box box = boxes[node_idx];
 		for (int i = 0; i < count; i++)
 		{
 			float red = min(1.0f, node.depth / 10.0f);

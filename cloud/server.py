@@ -129,13 +129,15 @@ class server:
         end_signal.wait()
         print("Quit receive.")
     
-    def send(self, end_signal, queue, child_conn, buffer_size=10240):
+    def send(self, end_signal, queue, child_conn, buffer_size=10240):   
         print("===========================================================")
         print("Send process start!") 
         fd = recv_handle(child_conn) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
         parameter_number = 14 
         frame_index = 0 
+        with open("../dataset/compress.txt", "w")as fout:
+            pass
         while not end_signal.is_set(): 
             try:
                 viewpoint = None 
@@ -147,12 +149,21 @@ class server:
                 if viewpoint is not None:
                     frame_index += 1 
                     print(f"Send [{frame_index}] start.") 
+                    with open("../dataset/compress.txt", "a+")as fout:
+                        fout.write(f"Compress {frame_index}\n")
                     for i in range(parameter_number): 
                         tensor = queue.get() 
-                        message = zlib.compress(pickle.dumps(tensor)) 
-                        data_size = len(message) 
-                        connection.sendall(data_size.to_bytes(4, byteorder='big')) 
-                        for i in range(0, data_size, buffer_size):
+                        data_decom = pickle.dumps(tensor)
+                        # size_decom = len(data_decom)
+                        message = zlib.compress(data_decom) 
+                        size_com = len(message) 
+                        # if i == 0:
+                        #     with open("../dataset/compress.txt", "a+") as fout:
+                        #         fout.write(f"\t\tsize = {tensor.size(0)}\n")
+                        # with open("../dataset/compress.txt", "a+") as fout:
+                        #     fout.write(f"\t\t{i}:\t{size_decom}, {size_com}, {(size_com/size_decom):.4f}\n")
+                        connection.sendall(size_com.to_bytes(4, byteorder='big')) 
+                        for i in range(0, size_com, buffer_size):
                             try: 
                                 chunk = message[i : i + buffer_size] 
                                 if not end_signal.is_set(): 
@@ -186,7 +197,6 @@ class server:
         point_number = scene.gaussians._xyz.size(0) 
         box_number = scene.gaussians.boxes.size(0) 
         # tag 
-        # frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
         last_frame = torch.full((point_number, ), -999, dtype=torch.int).cuda() # last frame index 
         child_indices = torch.zeros(point_number, dtype=torch.int).cuda()       # child index 
         parent_indices = torch.zeros(point_number, dtype=torch.int).cuda()      # parent index 
@@ -201,12 +211,13 @@ class server:
         opacity = scene.gaussians.get_opacity.cpu() # opacity 
         scales = scene.gaussians.get_scaling.cpu() # 高斯球三个方向的半径 
         shs = scene.gaussians.get_features.cpu() # 球谐函数 
+        # print(means3D.size(), rotations.size(), opacity.size(), scales.size(), shs.size()) 
         # Tree Traversal 
         torch.cuda.synchronize() 
         frame_index = 0 # 记录第几帧数据 
         window_size = 10 # 最近的帧数据 
-        with open("to_pass.txt", "w") as fout:
-            pass
+        # with open("to_pass.txt", "w") as fout:
+        #     pass
         while not end_signal.is_set():
             viewpoint = None 
             try:
@@ -244,9 +255,9 @@ class server:
                     parent_box_indices,         # parent box index 
                     leafs_tag,                  # whether child is leaf 
                     num_siblings)               # the number of nodes' siblings 
-                print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
-                with open("to_pass.txt", "a+") as fout:
-                    fout.write(f"frame_index = {frame_index}, {to_pass}\n") 
+                # print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
+                # with open("to_pass.txt", "a+") as fout:
+                #     fout.write(f"frame_index = {frame_index}, {to_pass}\n") 
                 c_indices = child_indices[:to_pass].cpu().contiguous()
                 c_box_indices = child_box_indices[:to_pass].cpu().contiguous()
                 p_indices = parent_indices[:to_pass].cpu().contiguous()

@@ -94,7 +94,7 @@ torch::Tensor& nodes_for_render_indices)
 	render_indices.contiguous().data_ptr<int>(),
 	nullptr,
 	parent_indices.contiguous().data_ptr<int>(),
-	nodes_for_render_indices.contiguous().data_ptr<int>())
+	nodes_for_render_indices.contiguous().data_ptr<int>());
 }
 
 void GetTsIndexed(
