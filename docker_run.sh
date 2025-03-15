@@ -1,14 +1,15 @@
-PROJECT_DIR=/home/zliu/project/webGS
-DATA_DIR=/data/zliu/docker_3dgs
+PROJECT_DIR=/data/zliu/webGS 
+DATA_DIR=/data/zliu/docker_3dgs/small_city
 IMAGE_NAME=webgs
 IMAGE_VERSION=v0
 IMAGE_NEXT_VERSION=v1
-CONTAINER=webGS
+GPU_INDEX=1
+CONTAINER=render_2
 
 docker run -it --rm \
     --ulimit memlock=-1:-1 \
     --shm-size=16g \
-    --gpus all \
+    --gpus device=${GPU_INDEX} \
     --network host \
     -v ${DATA_DIR}:/workspace/data -v ${PROJECT_DIR}:/workspace/code \
     --name ${CONTAINER} \

@@ -153,13 +153,14 @@ def render_post(
     
     Background tensor (bg_color) must be on GPU!
     """
+ 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") 
+    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
         screenspace_points.retain_grad()
     except:
         pass
-    
+
     # Set up rasterization configuration
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
@@ -167,6 +168,7 @@ def render_post(
     means3D = pc.get_xyz
     means2D = screenspace_points
     opacity = pc.get_opacity
+
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
     scales = None
@@ -193,7 +195,7 @@ def render_post(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    
+        
     if render_indices.size(0) != 0:
         render_inds = render_indices.long()
         if interp_python:
@@ -214,20 +216,23 @@ def render_post(
             rotations_base = ((interps * rots) + interps_inv * parents).contiguous()
             
             opacity_base = (interps * opacity[render_inds] + interps_inv * opacity[parent_inds]).contiguous()
+
             if pc.skybox_points == 0:
                 skybox_inds = torch.Tensor([]).long()
             else:
-                skybox_inds = torch.arange(pc._xyz.size(0) - pc.skybox_points, pc._xyz.size(0), device="cuda").long()
-            means3D = torch.cat((means3D_base, means3D[skybox_inds])).contiguous() 
+                skybox_inds = torch.arange(pc._xyz.size(0) - pc.skybox_points, pc._xyz.size(0)-1, device="cuda").long()
+
+            means3D = torch.cat((means3D_base, means3D[skybox_inds])).contiguous()  
             shs = torch.cat((shs_base, shs[skybox_inds])).contiguous() 
             opacity = torch.cat((opacity_base, opacity[skybox_inds])).contiguous()  
             rotations = torch.cat((rotations_base, rotations[skybox_inds])).contiguous()    
-            means2D = means2D[:(num_entries + pc.skybox_points)].contiguous() 
+            means2D = means2D[:(num_entries + pc.skybox_points)].contiguous()     
             scales = torch.cat((scales_base, scales[skybox_inds])).contiguous()  
 
             interpolation_weights = interpolation_weights.clone().detach()
             interpolation_weights[num_entries:num_entries+pc.skybox_points] = 1.0 
             num_node_kids[num_entries:num_entries+pc.skybox_points] = 1 
+        
         else:
             means3D = means3D[render_inds].contiguous()
             means2D = means2D[render_inds].contiguous()
@@ -238,52 +243,55 @@ def render_post(
 
         render_indices = torch.Tensor([]).int()
         parent_indices = torch.Tensor([]).int()
-    raster_settings = GaussianRasterizationSettings( 
+        
+    raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
         tanfovx=tanfovx,
         tanfovy=tanfovy,
         bg=bg_color,
-        scale_modifier=1.0,
+        scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,
         projmatrix=viewpoint_camera.full_proj_transform,
-        sh_degree=3, # pc.active_sh_degree 
+        sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        debug=False, # pipe.debug
-        render_indices=torch.Tensor([]).int(),
-        parent_indices=torch.Tensor([]).int(),
+        debug=pipe.debug,
+        render_indices=render_indices,
+        parent_indices=parent_indices,
         interpolation_weights=interpolation_weights,
         num_node_kids=num_node_kids,
-        do_depth=False 
+        do_depth=False
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-    rendered_image, _, _ = rasterizer( # radii
+
+    rendered_image, radii, _ = rasterizer(
         means3D = means3D,
-        means2D = None,
+        means2D = means2D,
         shs = shs,
-        colors_precomp = None,
+        colors_precomp = colors_precomp,
         opacities = opacity,
         scales = scales,
         rotations = rotations,
-        cov3D_precomp = None)
-    # print(use_trained_exp, pc.pretrained_exposures)
-    # if use_trained_exp and pc.pretrained_exposures:
-    #     try:
-    #         exposure = pc.pretrained_exposures[viewpoint_camera.image_name]
-    #         rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
-    #     except Exception as e:
-    #         print(f"Exposures should be optimized in single. Missing exposure for image {viewpoint_camera.image_name}")
+        cov3D_precomp = cov3D_precomp)
+    
+    if use_trained_exp and pc.pretrained_exposures:
+        try:
+            exposure = pc.pretrained_exposures[viewpoint_camera.image_name]
+            rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
+        except Exception as e:
+            print(f"Exposures should be optimized in single. Missing exposure for image {viewpoint_camera.image_name}")
     rendered_image = rendered_image.clamp(0, 1)
-    # vis_filter = radii > 0
+    
+    vis_filter = radii > 0
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     return {"render": rendered_image,
             "viewspace_points": screenspace_points,
-            "visibility_filter" : None, # vis_filter,
-            "radii": None} # radii[vis_filter]}
+            "visibility_filter" : vis_filter,
+            "radii": radii[vis_filter]}
 
 def render_coarse(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, zfar=0.0, override_color = None, indices = None):
     """

@@ -129,7 +129,6 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
                               image_path=image_path, mask_path=mask_path, depth_path=depth_path, image_name=image_name, 
                               width=width, height=height, is_test=image_name in test_cam_names_list)
         cam_infos.append(cam_info)
-        # print("\n", images_folder, extr.name, image_name, cam_info, "\n\n\n")
     sys.stdout.write('\n')
     return cam_infos
 
@@ -244,7 +243,7 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
                 test_cam_names_list = [line.strip() for line in file]
     else:
         test_cam_names_list = []
-    # print(test_cam_names_list)
+
     reading_dir = "images" if images == None else images
     masks_reading_dir = masks if masks == "" else os.path.join(path, masks)
 
@@ -258,7 +257,7 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
     test_cam_infos = [c for c in cam_infos if c.is_test]
     print(len(test_cam_infos), "test images")
     print(len(train_cam_infos), "train images")
-    # print(train_cam_infos[0])
+
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     scene_info = SceneInfo(point_cloud=pcd,

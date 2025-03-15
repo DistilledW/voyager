@@ -65,12 +65,11 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
 
     limmax = 0.1
     limmin = 0.005
-    # cnt = 0
+
     while iteration < opt.iterations + 1:
-    # while iteration < 1:
         for viewpoint_batch in training_generator:
             for viewpoint_cam in viewpoint_batch:
-                # cnt += 1
+
                 sample = torch.rand(1).item()
                 limit = math.pow(2, sample * (math.log2(limmax) - math.log2(limmin)) + math.log2(limmin))
                 scale = 1
@@ -158,8 +157,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                         print("peak memory: ", torch.cuda.max_memory_allocated(device='cuda'))
 
                     if iteration == opt.iterations:
-                    #if iteration == opt.iterations or cnt == 10:
-                
+                            
                         progress_bar.close()
                         return
 

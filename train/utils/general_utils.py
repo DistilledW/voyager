@@ -22,7 +22,6 @@ def inverse_sigmoid(x):
 def PILtoTorch(pil_image, resolution):
     if resolution[0] != pil_image.size[0] or resolution[1] != pil_image.size[1]:
         pil_image = pil_image.resize(resolution, Image.LANCZOS)
-    # print("---")
     resized_image = torch.from_numpy(np.array(pil_image)) / 255.0
     if len(resized_image.shape) == 3:
         return resized_image.permute(2, 0, 1)

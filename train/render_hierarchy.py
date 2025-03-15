@@ -38,19 +38,23 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
     nodes_for_render_indices = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
     interpolation_weights = torch.zeros(scene.gaussians._xyz.size(0)).float().cuda()
     num_siblings = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
-    psnr_test = 0.0 
-    ssims = 0.0 
-    lpipss = 0.0 
+
+    psnr_test = 0.0
+    ssims = 0.0
+    lpipss = 0.0
 
     cameras = scene.getTestCameras() if eval else scene.getTrainCameras()
+    frame_index = 0
     for viewpoint in tqdm(cameras):
         viewpoint=viewpoint
         viewpoint.world_view_transform = viewpoint.world_view_transform.cuda()
         viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
         viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda()
         viewpoint.camera_center = viewpoint.camera_center.cuda()
+
         tanfovx = math.tan(viewpoint.FoVx * 0.5)
         threshold = (2 * (tau + 0.5)) * tanfovx / (0.5 * viewpoint.image_width)
+
         to_render = expand_to_size(
             scene.gaussians.nodes,
             scene.gaussians.boxes,
@@ -60,82 +64,80 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             render_indices,
             parent_indices,
             nodes_for_render_indices)
-        indices = render_indices[:to_render].int().contiguous() 
-        node_indices = nodes_for_render_indices[:to_render].contiguous() 
         
-        nodes = scene.gaussians.nodes[node_indices].contiguous() # nodes 
-        p_nodes_indices = nodes[:, 1].contiguous()      # parents nodes index
-        p_nodes = scene.gaussians.nodes[p_nodes_indices].contiguous()  # parents nodes
-        p_indices = p_nodes[:, 2].contiguous()
-        p_indices = torch.clamp(p_indices, 0, scene.gaussians.nodes.size(0)-1)
+        indices = render_indices[:to_render].int().contiguous()
+        node_indices = nodes_for_render_indices[:to_render].contiguous()
 
-        # start 
-        get_interpolation_weights( 
-            node_indices, 
-            threshold, 
-            scene.gaussians.nodes, 
-            scene.gaussians.boxes, 
-            viewpoint.camera_center.cpu(), 
-            torch.zeros((3)), 
-            interpolation_weights, 
-            num_siblings 
-        ) 
-        image = render_post( 
+        get_interpolation_weights(
+            node_indices,
+            threshold,
+            scene.gaussians.nodes,
+            scene.gaussians.boxes,
+            viewpoint.camera_center.cpu(),
+            torch.zeros((3)),
+            interpolation_weights,
+            num_siblings
+        )
+
+        image = torch.clamp(render_post(
             viewpoint, 
             scene.gaussians, 
             pipe, 
             torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda"), 
-            render_indices=indices, 
-            parent_indices = parent_indices, 
-            interpolation_weights = interpolation_weights, 
+            render_indices=indices,
+            parent_indices = parent_indices,
+            interpolation_weights = interpolation_weights,
             num_node_kids = num_siblings, 
-            use_trained_exp=args.train_test_exp 
-            )["render"]
+            use_trained_exp=args.train_test_exp
+            )["render"], 0.0, 1.0)
 
         gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-        alpha_mask = viewpoint.alpha_mask.cuda()
-        
-        # if args.train_test_exp:
-        #     image = image[..., image.shape[-1] // 2:]
-        #     gt_image = gt_image[..., gt_image.shape[-1] // 2:]
-        #     alpha_mask = alpha_mask[..., alpha_mask.shape[-1] // 2:]
-        # try:
-        #     torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
-        # except:
-        #     os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
-        #     torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
-        if eval:
-            image *= alpha_mask 
-            gt_image *= alpha_mask 
-            psnr_test += psnr(image, gt_image).mean().double() 
-            ssims += ssim(image, gt_image).mean().double() 
-            lpipss += lpips(image, gt_image, net_type='vgg').mean().double() 
-            with open("../dataset/render.log", "a") as fout:
-                fout.write(f"{viewpoint.image_name}: {psnr(image, gt_image).mean().double()}, {ssim(image, gt_image).mean().double()}, {lpips(image, gt_image, net_type='vgg').mean().double()}\n")
 
-        torch.cuda.empty_cache() 
-    if eval and len(scene.getTestCameras()) > 0:
-        psnr_test /= len(scene.getTestCameras()) 
-        ssims /= len(scene.getTestCameras()) 
-        lpipss /= len(scene.getTestCameras()) 
+        alpha_mask = viewpoint.alpha_mask.cuda()
+
+        if args.train_test_exp:
+            image = image[..., image.shape[-1] // 2:]
+            gt_image = gt_image[..., gt_image.shape[-1] // 2:]
+            alpha_mask = alpha_mask[..., alpha_mask.shape[-1] // 2:]
+
+        try:
+            torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+        except:
+            os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
+            torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+        if eval:
+            image *= alpha_mask
+            gt_image *= alpha_mask
+            psnr_test += psnr(image, gt_image).mean().double()
+            ssims += ssim(image, gt_image).mean().double()
+            lpipss += lpips(image, gt_image, net_type='vgg').mean().double()
+        frame_index+=1
+        # if frame_index == 10:
+        #     break 
+        # torch.cuda.empty_cache()
+    if eval and frame_index > 0: # len(scene.getTestCameras())
+        psnr_test /= frame_index 
+        ssims /= frame_index 
+        lpipss /= frame_index 
         print(f"tau: {tau}, PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f}") 
 
 if __name__ == "__main__":
     # Set up command line argument parser
-    parser = ArgumentParser(description="Rendering script parameters") 
-    lp = ModelParams(parser) 
-    op = OptimizationParams(parser) 
-    pp = PipelineParams(parser) 
-    parser.add_argument('--out_dir', type=str, default="") 
-    parser.add_argument("--taus", nargs="+", type=float, default=[0.0, 6.0, 20.0, 50.0])
+    parser = ArgumentParser(description="Rendering script parameters")
+    lp = ModelParams(parser)
+    op = OptimizationParams(parser)
+    pp = PipelineParams(parser)
+    parser.add_argument('--out_dir', type=str, default="")
+    parser.add_argument("--taus", nargs="+", type=float, default=[])
     args = parser.parse_args(sys.argv[1:])
     
-    print("Rendering " + args.model_path)
+    # print("Rendering " + args.model_path)
 
     dataset, pipe = lp.extract(args), pp.extract(args)
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.active_sh_degree = dataset.sh_degree
-
     scene = Scene(dataset, gaussians, resolution_scales = [1], create_from_hier=True)
-    for tau in [6.0]:# args.taus:
+
+    for tau in args.taus:
         render_set(args, scene, pipe, os.path.join(args.out_dir, f"render_{tau}"), tau, args.eval)
+

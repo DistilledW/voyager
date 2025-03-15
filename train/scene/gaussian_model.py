@@ -353,7 +353,7 @@ class GaussianModel:
             self.pretrained_exposures = None
 
         #retrieve skybox
-        self.skybox_points = 0
+        self.skybox_points = 0         
         if scaffold_file != "":
             scaffold_xyz, features_dc_scaffold, features_extra_scaffold, opacities_scaffold, scales_scaffold, rots_scaffold = self.load_ply_file(scaffold_file + "/point_cloud.ply", 1)
             scaffold_xyz = torch.from_numpy(scaffold_xyz).float()

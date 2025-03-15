@@ -1,8 +1,6 @@
 dataset/
 cloud/submodules/DPT/
 cloud/submodules/Depth-Anything-V2/
-train/submodules/DPT/
-train/submodules/Depth-Anything-V2/
 *__pycache__/
 *.pyc
 .vscode
@@ -15,3 +13,9 @@ LICENSE_h-3dgs.md
 videoProcess/
 delete
 docker_run.sh
+
+# client/run.sh
+# cloud/run.sh
+# train/run.sh
+# train/train.sh
+# docker_run.sh

@@ -61,7 +61,7 @@ __global__ void putRenderIndices(Node* nodes, int N, int* node_counts, int* node
 	Node node = nodes[idx];
 	int count = node_counts[idx];
 	int offset = idx == 0 ? 0 : node_offsets[idx - 1];
-	// int start = node.start;
+	int start = node.start;
 	
 	int parentgaussian = -1;
 	if (node.parent != -1)
@@ -187,7 +187,7 @@ __global__ void changeNodesOnce(
 		int parent_node_id = node.parent;
 		if (parent_node_id != -1)
 		{
-			// Node parent_node = nodes[parent_node_id];
+			Node parent_node = nodes[parent_node_id];
 			float parent_size = computeSizeGPU(boxes[parent_node_id], *viewpoint, zdir);
 			if (parent_size < target_size) // collapse
 			{
@@ -252,7 +252,7 @@ __global__ void putRenderIndicesIndexed(Node* nodes, int N, int* node_indices, i
 	Node node = nodes[node_idx];
 	int count = render_counts[idx];
 	int offset = idx == 0 ? 0 : render_offsets[idx - 1];
-	// int start = node.start;
+	int start = node.start;
 
 	int parentgaussian = -1;
 	if (node.parent != -1)
@@ -269,7 +269,7 @@ __global__ void putRenderIndicesIndexed(Node* nodes, int N, int* node_indices, i
 
 	if (debug != nullptr)
 	{
-		// Box box = boxes[node_idx];
+		Box box = boxes[node_idx];
 		for (int i = 0; i < count; i++)
 		{
 			float red = min(1.0f, node.depth / 10.0f);
@@ -505,36 +505,6 @@ void Switching::getTsIndexed(
 		ts, 
 		kids);
 }
-__global__ void markNodesForSize_2(Node* nodes, Box* boxes, int N, Point* viewpoint, Point zdir, float target_size, int* render_counts, int* node_markers)
-{
-	int idx = blockDim.x * blockIdx.x + threadIdx.x;
-	if (idx >= N)
-		return;
-
-	int node_id = idx;
-	Node node = nodes[node_id];
-	float size = computeSizeGPU(boxes[node_id], *viewpoint, zdir);
-
-	int count = 0;
-	if (size >= target_size)
-		count = node.count_leafs;
-	else if (node.parent != -1)
-	{
-		float parent_size = computeSizeGPU(boxes[node.parent], *viewpoint, zdir);
-		if (parent_size >= target_size)
-		{
-			count = node.count_leafs;
-			if (node.depth != 0)
-				count += node.count_merged;
-		}
-	}
-
-	if (count != 0 && node_markers != nullptr)
-		node_markers[node_id] = 1;
-
-	if (render_counts != nullptr)
-		render_counts[node_id] = count;
-}
 
 int Switching::expandToSize(
 	int N,
@@ -552,11 +522,11 @@ int Switching::expandToSize(
 	thrust::device_vector<char> temp_storage;
 	thrust::device_vector<int> render_counts(N);
 	thrust::device_vector<int> render_offsets(N);
-	
+
 	Point zdir = { x, y, z };
 
 	int num_blocks = (N + 255) / 256;
-	markNodesForSize_2 << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers);
+	markNodesForSize << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers);
 
 	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
 	temp_storage.resize(temp_storage_bytes);
