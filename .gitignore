@@ -1,4 +1,6 @@
 dataset/
+!dataset/*.py 
+!dataset/*.sh
 cloud/submodules/DPT/
 cloud/submodules/Depth-Anything-V2/
 *__pycache__/

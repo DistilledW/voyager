@@ -519,7 +519,7 @@ __forceinline__ __device__ float4 tPoint4x4(const float3& p, const float* matrix
 	return transformed;
 }
 
-__forceinline__ __device__ bool frustum_culling(
+__forceinline__ __device__ bool in_frustum(
 	float3 p_orig,
 	const float* viewmatrix,
 	const float* projmatrix)
@@ -537,7 +537,7 @@ __forceinline__ __device__ bool frustum_culling(
 }
 
 __global__ void expandToSize_markNodesForSize(int N, Node* nodes, Box* boxes, float* means3D, float threshold, Point* viewpoint, Point zdir,  
-	int frame_index, int window_size, float* world_view_transform, float* projection_matrix, int* last_frame, int* render_counts) 
+	int frame_index, int window_size, float* world_view_transform, float* projection_matrix, int* last_frame, int* render_counts, bool frustum_culling) 
 {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= N)
@@ -545,13 +545,18 @@ __global__ void expandToSize_markNodesForSize(int N, Node* nodes, Box* boxes, fl
 
 	Node node = nodes[idx];
 	int index = node.start;
-	float3 p_orig = { means3D[3 * index], means3D[3 * index + 1], means3D[3 * index + 2] };
-	bool ret = frustum_culling(p_orig, world_view_transform, projection_matrix);
 	// 视锥检查	
-	if (last_frame[idx] >= frame_index - window_size || ((node.count_leafs + node.count_merged) != 1) || !ret){
+	if (frustum_culling){
+		float3 p_orig = { means3D[3 * index], means3D[3 * index + 1], means3D[3 * index + 2] };
+		bool ret = in_frustum(p_orig, world_view_transform, projection_matrix);
+		if (!ret) {
+			render_counts[idx] = 0;
+			return ;
+		}
+	}
+	if (last_frame[idx] >= frame_index - window_size || ((node.count_leafs + node.count_merged) != 1)){
 		render_counts[idx] = 0;
-		if (ret)
-			last_frame[idx] = frame_index; // 更新 
+		last_frame[idx] = frame_index; // 更新 
 		return ;
 	} 
 	Box box = boxes[idx];
@@ -601,6 +606,7 @@ int Switching::expandToSize(
 	int frame_index, int window_size, 
 	float* world_view_transform, 
 	float* projection_matrix, 
+	bool frustum_culling,
 	// list for clients 
 	int* last_frame, 
 	int* child_indices, 
@@ -623,7 +629,7 @@ int Switching::expandToSize(
 	Point zdir = { x, y, z };
 	int num_blocks = (N + 255) / 256;
 	expandToSize_markNodesForSize << <num_blocks, 256 >> > (N, (Node*)nodes, (Box*)boxes, means3D, threshold, (Point*)viewpoint, zdir, 
-		frame_index, window_size, world_view_transform, projection_matrix, last_frame, render_counts);
+		frame_index, window_size, world_view_transform, projection_matrix, last_frame, render_counts, frustum_culling);
 	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts, render_offsets, N);
 	cudaError_t err = cudaMalloc(&d_temp_storage, temp_storage_bytes);
 	if (err != cudaSuccess)

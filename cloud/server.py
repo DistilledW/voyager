@@ -136,8 +136,6 @@ class server:
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
         parameter_number = 14 
         frame_index = 0 
-        with open("../dataset/compress.txt", "w")as fout:
-            pass
         while not end_signal.is_set(): 
             try:
                 viewpoint = None 
@@ -149,19 +147,11 @@ class server:
                 if viewpoint is not None:
                     frame_index += 1 
                     print(f"Send [{frame_index}] start.") 
-                    with open("../dataset/compress.txt", "a+")as fout:
-                        fout.write(f"Compress {frame_index}\n")
                     for i in range(parameter_number): 
                         tensor = queue.get() 
                         data_decom = pickle.dumps(tensor)
-                        # size_decom = len(data_decom)
                         message = zlib.compress(data_decom) 
                         size_com = len(message) 
-                        # if i == 0:
-                        #     with open("../dataset/compress.txt", "a+") as fout:
-                        #         fout.write(f"\t\tsize = {tensor.size(0)}\n")
-                        # with open("../dataset/compress.txt", "a+") as fout:
-                        #     fout.write(f"\t\t{i}:\t{size_decom}, {size_com}, {(size_com/size_decom):.4f}\n")
                         connection.sendall(size_com.to_bytes(4, byteorder='big')) 
                         for i in range(0, size_com, buffer_size):
                             try: 
@@ -185,20 +175,20 @@ class server:
         # torch.cuda.empty_cache()
         end_signal.wait()
         print("Quit send.")
-    @torch.no_grad()
-    def tree_traversal(self, end_signal, dataset, pipe, cameras_future, cameras_past, queue):
-        print("===========================================================")
-        print("tree traversal process start!")
-        torch.cuda.init()
-        torch.cuda.set_device(torch.cuda.current_device())
-        gaussians = GaussianModel(dataset.sh_degree)
-        gaussians.active_sh_degree = dataset.sh_degree
-        scene = Scene(dataset, gaussians, resolution_scales = [1], create_from_hier=True)
+    @torch.no_grad() 
+    def tree_traversal(self, end_signal, dataset, pipe, cameras_future, cameras_past, queue, args):
+        print("===========================================================") 
+        print("tree traversal process start!") 
+        torch.cuda.init() 
+        torch.cuda.set_device(torch.cuda.current_device()) 
+        gaussians = GaussianModel(dataset.sh_degree) 
+        gaussians.active_sh_degree = dataset.sh_degree 
+        scene = Scene(dataset, gaussians, resolution_scales = [1], create_from_hier=True) 
         point_number = scene.gaussians._xyz.size(0) 
         box_number = scene.gaussians.boxes.size(0) 
         # tag 
-        last_frame = torch.full((point_number, ), -999, dtype=torch.int).cuda() # last frame index 
-        child_indices = torch.zeros(point_number, dtype=torch.int).cuda()       # child index 
+        last_frame = torch.full((point_number, ), -999, dtype=torch.int).cuda() # last frame index  => int8
+        child_indices = torch.zeros(point_number, dtype=torch.int).cuda()       # child index       => 
         parent_indices = torch.zeros(point_number, dtype=torch.int).cuda()      # parent index 
         child_box_indices = torch.zeros(box_number, dtype=torch.int).cuda()     # child box index 
         parent_box_indices = torch.zeros(box_number, dtype=torch.int).cuda()    # parent box index 
@@ -211,13 +201,11 @@ class server:
         opacity = scene.gaussians.get_opacity.cpu() # opacity 
         scales = scene.gaussians.get_scaling.cpu() # 高斯球三个方向的半径 
         shs = scene.gaussians.get_features.cpu() # 球谐函数 
-        # print(means3D.size(), rotations.size(), opacity.size(), scales.size(), shs.size()) 
         # Tree Traversal 
         torch.cuda.synchronize() 
         frame_index = 0 # 记录第几帧数据 
         window_size = 10 # 最近的帧数据 
-        # with open("to_pass.txt", "w") as fout:
-        #     pass
+        print("Tree traversal")
         while not end_signal.is_set():
             viewpoint = None 
             try:
@@ -235,7 +223,7 @@ class server:
                 viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
                 viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
                 viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
-                # print("expand to size") 
+                print("expand to size") 
                 to_pass = expand_to_size( 
                     scene.gaussians.nodes,      # nodes 
                     scene.gaussians.boxes,      # boxes 
@@ -247,6 +235,7 @@ class server:
                     window_size,                # window size 
                     viewpoint.world_view_transform, 
                     viewpoint.projection_matrix, 
+                    args.frustum_culling, 
                     # list for clients 
                     last_frame,                 # last frame index 
                     child_indices,              # child index 
@@ -255,7 +244,7 @@ class server:
                     parent_box_indices,         # parent box index 
                     leafs_tag,                  # whether child is leaf 
                     num_siblings)               # the number of nodes' siblings 
-                # print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
+                print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
                 # with open("to_pass.txt", "a+") as fout:
                 #     fout.write(f"frame_index = {frame_index}, {to_pass}\n") 
                 c_indices = child_indices[:to_pass].cpu().contiguous()
@@ -302,30 +291,35 @@ class server:
                     queue.put(leafs)
                     queue.put(siblings_to_render)
                 elif frame_index == 1 and False: 
-                    os.makedirs(f"data/{self.shared_data['tau']}", exist_ok=True) 
-                    torch.save(child_means3D, os.path.join(f"data/{self.shared_data['tau']}/0.pt"))
-                    torch.save(child_rotations, os.path.join(f"data/{self.shared_data['tau']}/1.pt"))
-                    torch.save(child_opacity, os.path.join(f"data/{self.shared_data['tau']}/2.pt"))
-                    torch.save(child_scales, os.path.join(f"data/{self.shared_data['tau']}/3.pt"))
-                    torch.save(child_shs, os.path.join(f"data/{self.shared_data['tau']}/4.pt"))
-                    torch.save(child_boxes, os.path.join(f"data/{self.shared_data['tau']}/5.pt"))
-                    torch.save(parent_means3D, os.path.join(f"data/{self.shared_data['tau']}/6.pt"))
-                    torch.save(parent_rotations, os.path.join(f"data/{self.shared_data['tau']}/7.pt"))
-                    torch.save(parent_opacity, os.path.join(f"data/{self.shared_data['tau']}/8.pt"))
-                    torch.save(parent_scales, os.path.join(f"data/{self.shared_data['tau']}/9.pt"))
-                    torch.save(parent_shs, os.path.join(f"data/{self.shared_data['tau']}/10.pt"))
-                    torch.save(parent_boxes, os.path.join(f"data/{self.shared_data['tau']}/11.pt"))
-                    torch.save(leafs, os.path.join(f"data/{self.shared_data['tau']}/12.pt"))
-                    torch.save(siblings_to_render, os.path.join(f"data/{self.shared_data['tau']}/13.pt"))
-                    break 
-                print(f"Tree Traversal[{frame_index}] end.")
+                    directory = f"../dataset/first_frame/without/{self.shared_data['tau']}" 
+                    if args.frustum_culling:
+                        directory = f"../dataset/first_frame/with/{self.shared_data['tau']}"
+                    os.makedirs(directory, exist_ok=True) 
+                    torch.save(child_means3D, os.path.join(directory, "0.pt"))
+                    torch.save(child_rotations, os.path.join(directory, "1.pt"))
+                    torch.save(child_opacity, os.path.join(directory, "2.pt"))
+                    torch.save(child_scales, os.path.join(directory, "3.pt"))
+                    torch.save(child_shs, os.path.join(directory, "4.pt"))
+                    torch.save(child_boxes, os.path.join(directory, "5.pt"))
+                    torch.save(parent_means3D, os.path.join(directory, "6.pt"))
+                    torch.save(parent_rotations, os.path.join(directory, "7.pt"))
+                    torch.save(parent_opacity, os.path.join(directory, "8.pt"))
+                    torch.save(parent_scales, os.path.join(directory, "9.pt"))
+                    torch.save(parent_shs, os.path.join(directory, "10.pt"))
+                    torch.save(parent_boxes, os.path.join(directory, "11.pt"))
+                    torch.save(leafs, os.path.join(directory, "12.pt"))
+                    torch.save(siblings_to_render, os.path.join(directory, "13.pt"))
+                    print("Save over!")
+                    return 
+                print(f"Tree Traversal[{frame_index}] end.") 
         # cameras_future.close()
         # cameras_past.close()
         # gc.collect()
         # torch.cuda.empty_cache()
         end_signal.wait()
         print("quit tree traversal.")
-
+# 测试“各部分的延迟” 
+# 做算法上的加速
 if __name__ == "__main__":
     # Set up command line argument parser 
     parser = ArgumentParser(description="Rendering script parameters") 
@@ -335,10 +329,12 @@ if __name__ == "__main__":
     parser.add_argument('--ip', type=str, default="127.0.0.1") 
     parser.add_argument('--port', type=int, default=50000) 
     parser.add_argument('--client', type=int, default=1) 
+    parser.add_argument('--frustum_culling', action="store_true") 
+    parser.add_argument('--tt_accelerator', action="store_true") # use tree traversal accelerator 
     args = parser.parse_args(sys.argv[1:]) 
     dataset, pipe = lp.extract(args), pp.extract(args) 
     mp.set_start_method("spawn", force=True) 
-
+    
     # server 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
     server_socket.bind((args.ip, args.port)) 
@@ -347,8 +343,8 @@ if __name__ == "__main__":
     print(f"Server listening on {args.ip}:{args.port}, while the number of client equals {args.client}\n") 
     
     # while True: 
+    print("Wait to connect...") 
     for i in range(1): 
-        print("Wait to connect...") 
         client_sock, client_address = server_socket.accept() 
         # 进程间通信: 
         parent_conn1, child_conn1 = mp.Pipe() # 通信管道 
@@ -364,7 +360,7 @@ if __name__ == "__main__":
         s_receive.start() 
         s_send = mp.Process(target=ser.send, args=(end_signal, tensor_queue, child_conn2, )) 
         s_send.start() 
-        s_tt = mp.Process(target=ser.tree_traversal, args=(end_signal, dataset, pipe, cameras_future, cameras_past, tensor_queue, ))
+        s_tt = mp.Process(target=ser.tree_traversal, args=(end_signal, dataset, pipe, cameras_future, cameras_past, tensor_queue, args, ))
         s_tt.start() 
         send_handle(parent_conn1, client_sock.fileno(), s_receive.pid) 
         send_handle(parent_conn2, client_sock.fileno(), s_send.pid) 

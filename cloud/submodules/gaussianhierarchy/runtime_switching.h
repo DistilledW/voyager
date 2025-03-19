@@ -36,6 +36,7 @@ public:
 		int frame_index, int window_size, 
 		float* world_view_transform, 
 		float* projection_matrix, 
+		bool frustum_culling,
 		// list for clients 
 		int* last_frame = nullptr, 
 		int* child_indices = nullptr,

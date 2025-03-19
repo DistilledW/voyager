@@ -563,10 +563,10 @@ __global__ void expand_markNodesForSize(int N, Box* c_boxes, Box*p_boxes, float*
 	}
 	float size = computeSizeGPU(c_boxes[curr_idx], *viewpoint, zdir);	// child size
 	if (size >= threshold){
-		if (leafs_tag[curr_idx]){
+		// if (leafs_tag[curr_idx]){
 			render_counts[curr_idx] = 1;
 			last_frame[curr_idx] = 0;
-		}
+		// }
 	}else {
 		float p_size = computeSizeGPU(p_boxes[curr_idx], *viewpoint, zdir);	// parent size
 		if(p_size >= threshold){

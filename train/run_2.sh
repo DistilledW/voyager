@@ -4,7 +4,7 @@ ALIGNED=${DATASET}/camera_calibration/aligned
 CHUNKS=${DATASET}/camera_calibration/chunks 
 OUTPUT=${DATASET}/output 
 DATE=250315 
-RENDER_DIR=${DATASET}/renders/${DATE} 
+RENDER_DIR=${DATASET}/renders/train/full_render # ${DATE} 
 RECTIFIED=../rectified 
 LOG_DIR=${CODE}/dataset/logs 
 
@@ -29,6 +29,8 @@ if [ ! -e "$FILE" ]; then
     cmake . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j --config Release
     cd ../..
+else
+    echo "GaussianHierarchy has been built."
 fi
 
 # pip install submodules
@@ -63,21 +65,24 @@ done
 # cp test.txt 
 
 # render 
+# taus=(0.0 3.0 6.0 9.0 12.0 15.0 18.0 21.0 24.0 27.0 30.0)
+
 taus_1=(0.0 6.0 12.0 18.0 24.0)
 taus_2=(3.0 9.0 15.0 21.0 27.0 30.0)
 taus=("${taus_2[@]}")
-CURR_LOG_DIR="${LOG_DIR}/render_logs/train/full_render" # ${DATE}
+CURR_LOG_DIR="${LOG_DIR}/render_logs/train/get_gs_point_number_with_fc" # ${DATE}
 mkdir -p "$CURR_LOG_DIR"
 for tau in "${taus[@]}"; do 
-    LOG_FILE="${CURR_LOG_DIR}/${tau}.log"
+    # LOG_FILE="${CURR_LOG_DIR}/${tau}.log"
     python render_hierarchy.py \
     --source_path ${ALIGNED} \
     --model_path ${OUTPUT}/scaffold \
     --hierarchy ${OUTPUT}/merged.hier \
-    --out_dir ${RENDER_DIR} \
     --images ${RECTIFIED}/images \
     --alpha_masks ${RECTIFIED}/masks \
     --scaffold_file ${OUTPUT}/scaffold/point_cloud/iteration_30000 \
     --taus ${tau} \
-    --eval > ${LOG_FILE} 
+    --eval # > ${LOG_FILE} 
+    # --out_dir ${RENDER_DIR} \
+    # --frustum_culling \
 done 

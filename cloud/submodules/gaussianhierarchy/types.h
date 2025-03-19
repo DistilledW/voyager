@@ -45,10 +45,6 @@ struct Box
 	Point4 minn;
 	Point4 maxx;
 };
-struct GSPlane
-{
-	float x, y, z, d;
-};
 #endif
 
 struct Node

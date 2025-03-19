@@ -48,10 +48,6 @@ struct Box
 
 
 #endif
-struct GSPlane
-{
-	float x, y, z, d;
-};
 struct Node
 {
 	int depth = -1;

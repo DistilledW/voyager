@@ -38,4 +38,4 @@ python scripts/full_train.py \
     --depths_dir ${RECTIFIED}/depths \
     --masks_dir ${RECTIFIED}/masks \
     --chunks_dir ${CHUNKS} \
-    --output_dir ${OUTPUT} > ${LOG_DIR}/train.log
+    --output_dir ${OUTPUT} > ${LOG_DIR}/test.log

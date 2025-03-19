@@ -32,7 +32,6 @@ def direct_collate(x):
 @torch.no_grad()
 def render_set(args, scene, pipe, out_dir, tau, eval):
     render_path = out_dir
-
     render_indices = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
     parent_indices = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
     nodes_for_render_indices = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
@@ -45,6 +44,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
 
     cameras = scene.getTestCameras() if eval else scene.getTrainCameras()
     frame_index = 0
+    means3d = scene.gaussians.get_xyz.cuda()
     for viewpoint in tqdm(cameras):
         viewpoint=viewpoint
         viewpoint.world_view_transform = viewpoint.world_view_transform.cuda()
@@ -54,7 +54,6 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
 
         tanfovx = math.tan(viewpoint.FoVx * 0.5)
         threshold = (2 * (tau + 0.5)) * tanfovx / (0.5 * viewpoint.image_width)
-
         to_render = expand_to_size(
             scene.gaussians.nodes,
             scene.gaussians.boxes,
@@ -63,7 +62,11 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             torch.zeros((3)),
             render_indices,
             parent_indices,
-            nodes_for_render_indices)
+            nodes_for_render_indices, 
+            args.frustum_culling, 
+            viewpoint.world_view_transform, 
+            viewpoint.projection_matrix, 
+            means3d) 
         
         indices = render_indices[:to_render].int().contiguous()
         node_indices = nodes_for_render_indices[:to_render].contiguous()
@@ -95,25 +98,25 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
 
         alpha_mask = viewpoint.alpha_mask.cuda()
 
-        if args.train_test_exp:
-            image = image[..., image.shape[-1] // 2:]
-            gt_image = gt_image[..., gt_image.shape[-1] // 2:]
-            alpha_mask = alpha_mask[..., alpha_mask.shape[-1] // 2:]
+        # if args.train_test_exp:
+        #     image = image[..., image.shape[-1] // 2:]
+        #     gt_image = gt_image[..., gt_image.shape[-1] // 2:]
+        #     alpha_mask = alpha_mask[..., alpha_mask.shape[-1] // 2:]
 
-        try:
-            torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
-        except:
-            os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
-            torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+        # try:
+        #     torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+        # except:
+        #     os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
+        #     torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
         if eval:
             image *= alpha_mask
             gt_image *= alpha_mask
             psnr_test += psnr(image, gt_image).mean().double()
             ssims += ssim(image, gt_image).mean().double()
             lpipss += lpips(image, gt_image, net_type='vgg').mean().double()
-        frame_index+=1
-        # if frame_index == 10:
-        #     break 
+            with open(f"/workspace/code/dataset/point_number/train/100_without/{tau}.txt", "a+")as fout:
+                fout.write(f"{viewpoint.image_name}: {to_render}, {psnr(image, gt_image).mean().double()}, {ssim(image, gt_image).mean().double()}, {lpips(image, gt_image, net_type='vgg').mean().double()}\n")
+        frame_index += 1 
         # torch.cuda.empty_cache()
     if eval and frame_index > 0: # len(scene.getTestCameras())
         psnr_test /= frame_index 
@@ -129,6 +132,7 @@ if __name__ == "__main__":
     pp = PipelineParams(parser)
     parser.add_argument('--out_dir', type=str, default="")
     parser.add_argument("--taus", nargs="+", type=float, default=[])
+    parser.add_argument('--frustum_culling', action="store_true")
     args = parser.parse_args(sys.argv[1:])
     
     # print("Rendering " + args.model_path)

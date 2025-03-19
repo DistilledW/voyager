@@ -179,13 +179,18 @@ class client:
         if not os.path.exists(args.render_dir):
             os.makedirs(args.render_dir)
             print(f"Create folder {args.render_dir}.")
+        # send_start_signal.set() 
+        # return 
         torch.cuda.init() 
         torch.cuda.set_device(torch.cuda.current_device())
         # 第一帧数据作为起始数据 
         # child 
         tensors = [] 
+        tensor_directory = f"../dataset/first_frame/without/{self.shared_data['tau']}" 
+        if args.frustum_culling:
+            tensor_directory = f"../dataset/first_frame/with/{self.shared_data['tau']}" 
         for i in range(14): 
-            tensors.append(torch.load(os.path.join(args.test_data_dir, f"first_frame/{self.shared_data['tau']}/{i}.pt"), weights_only=True))        
+            tensors.append(torch.load(os.path.join(tensor_directory, f"{i}.pt"), weights_only=True))        
         child_means3D = tensors[0].cuda()
         child_rotations = tensors[1].cuda()
         child_opacity = tensors[2].cuda()
@@ -203,11 +208,11 @@ class client:
         leafs_tag = tensors[12].cuda() 
         num_siblings = tensors[13].cuda()
         # skybox:
-        sky_box_means3d = torch.load(os.path.join(args.test_data_dir, "skybox/means3d.pt"), weights_only=True).cuda()
-        sky_box_opacity = torch.load(os.path.join(args.test_data_dir, "skybox/opacity.pt"), weights_only=True).cuda()
-        sky_box_shs = torch.load(os.path.join(args.test_data_dir, "skybox/shs.pt"), weights_only=True).cuda()
-        sky_box_scales = torch.load(os.path.join(args.test_data_dir, "skybox/scales.pt"), weights_only=True).cuda()
-        sky_box_rotations = torch.load(os.path.join(args.test_data_dir, "skybox/rotations.pt"), weights_only=True).cuda()
+        sky_box_means3d = torch.load(os.path.join("../dataset/skybox/means3d.pt"), weights_only=True).cuda()
+        sky_box_opacity = torch.load(os.path.join("../dataset/skybox/opacity.pt"), weights_only=True).cuda()
+        sky_box_shs = torch.load(os.path.join("../dataset/skybox/shs.pt"), weights_only=True).cuda()
+        sky_box_scales = torch.load(os.path.join("../dataset/skybox/scales.pt"), weights_only=True).cuda()
+        sky_box_rotations = torch.load(os.path.join("../dataset/skybox/rotations.pt"), weights_only=True).cuda()
 
         # 初始化中间变量： 
         frame_index = 0 
@@ -216,10 +221,8 @@ class client:
         nodes_for_render_indices = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda() 
         interpolation_weights = torch.zeros(child_means3D.size(0), dtype=torch.float32).cuda() 
         last_frame = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda()
-        # frustum_plans = torch.zeros([6, 4], dtype=torch.float).cuda()
 
         # Evaluation 
-        rectified_data_dir = os.path.join(args.test_data_dir, "camera_calibration/rectified")
         psnr_test = 0.0 
         ssims = 0.0 
         lpipss = 0.0 
@@ -227,10 +230,10 @@ class client:
         window_size = 10 
         print("===========================================================") 
         print(f"Rendering process start:: {child_means3D.size()}")
-        if args.with_culling:
-            log_path = os.path.join(args.logs_dir, "culling", f"{self.shared_data['tau']}.log")
+        if args.frustum_culling:
+            log_path = os.path.join(args.logs_dir, "with", f"{self.shared_data['tau']}.log")
         else:
-            log_path = os.path.join(args.logs_dir, "original", f"{self.shared_data['tau']}.log")
+            log_path = os.path.join(args.logs_dir, "without", f"{self.shared_data['tau']}.log")
 
         send_start_signal.set() 
         while not end_signal.is_set(): 
@@ -256,7 +259,7 @@ class client:
                 break 
             overTime = 0 
             viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
-            viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
+            viewpoint.projection_matrix = viewpoint.projection_matrix.cuda() 
             viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
             viewpoint.camera_center = viewpoint.camera_center.cuda() 
             frame_index += 1 
@@ -271,7 +274,7 @@ class client:
                 child_means3D, 
                 threshold, 
                 viewpoint.camera_center, 
-                args.with_culling, 
+                args.frustum_culling, 
                 viewpoint.world_view_transform, 
                 viewpoint.projection_matrix, 
                 torch.zeros((3)), 
@@ -280,7 +283,7 @@ class client:
                 last_frame, 
                 render_indices, 
                 interpolation_weights) 
-            # print("out of force_search:: ", to_render) 
+            print("out of force_search:: ", to_render) 
             # 3. render 
             # 计算插值 
             indices = render_indices[:to_render].int().contiguous() 
@@ -332,11 +335,12 @@ class client:
                 scales = scales,
                 rotations = rotations) 
             image = image.clamp(0.0, 1.0) 
-            pil_alpha_mask = Image.open(os.path.join(rectified_data_dir, f"masks/{viewpoint.image_name.rsplit('.', 1)[0]}.png")) 
+            alpha_mask_path = os.path.join(args.alpha_masks, f"{viewpoint.image_name.rsplit('.', 1)[0]}.png")
+            pil_alpha_mask = Image.open(alpha_mask_path) 
             alpha_mask = (torch.from_numpy(np.array(pil_alpha_mask)) / 255.0).cuda()
             alpha_mask = alpha_mask.unsqueeze(dim=-1).permute(2, 0, 1)
             
-            pil_gt_image = Image.open(os.path.join(rectified_data_dir, f"images/{viewpoint.image_name}"))
+            pil_gt_image = Image.open(os.path.join(args.images, viewpoint.image_name))
             gt_image = (torch.from_numpy(np.array(pil_gt_image)) / 255.0).cuda()
             gt_image = gt_image.permute(2, 0, 1)
             
@@ -345,18 +349,18 @@ class client:
             # except:
             #     os.makedirs(os.path.dirname(os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
             #     torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
-            image *= alpha_mask 
-            gt_image *= alpha_mask 
-            psnr_test_ = psnr(image, gt_image).mean().double()
-            ssims_ = ssim(image, gt_image).mean().double()
-            lpipss_ = lpips(image, gt_image, net_type='vgg').mean().double()
-            psnr_test += psnr_test_ 
-            ssims += ssims_ 
-            lpipss += lpipss_ 
-            # log_path = os.path.join(args.logs_dir, f"{self.shared_data['tau']}.log")
-            with open(log_path, "a") as fout:
-                fout.write(f"{viewpoint.image_name}: {to_render}, {psnr_test_}, {ssims_}, {lpipss_}\n") 
-            print(f"frame_index = {frame_index}, to_render={to_render}, psnr_avg = {psnr_test / frame_index}, ssim_avg = {ssims / frame_index}, lpips_avg = {lpipss / frame_index}")
+            if args.eval:
+                image *= alpha_mask 
+                gt_image *= alpha_mask 
+                psnr_test_ = psnr(image, gt_image).mean().double()
+                ssims_ = ssim(image, gt_image).mean().double()
+                lpipss_ = lpips(image, gt_image, net_type='vgg').mean().double()
+                psnr_test += psnr_test_ 
+                ssims += ssims_ 
+                lpipss += lpipss_ 
+                with open(log_path, "a+") as fout:
+                    fout.write(f"{viewpoint.image_name}: {to_render}, {psnr_test_}, {ssims_}, {lpipss_}\n") 
+                print(f"frame_index = {frame_index}, to_render={to_render}, psnr_avg = {psnr_test / frame_index}, ssim_avg = {ssims / frame_index}, lpips_avg = {lpipss / frame_index}")
             # 4. 每隔一段时间，删掉一部分数据集中很久没有用到的高斯点 
             if frame_index % 10 == 0:
                 number_of_delete_points = child_means3D.size(0) 
@@ -389,7 +393,7 @@ class client:
                 # for debug 
                 number_of_delete_points = number_of_delete_points - child_means3D.size(0) 
                 print("Delete points: ", number_of_delete_points) 
-                torch.cuda.empty_cache() 
+                # torch.cuda.empty_cache() 
                 pass 
             # 5. 将新接收到的高斯点加入到数据集中 
             # child 
@@ -428,11 +432,10 @@ if __name__ == "__main__":
     parser.add_argument("--tau", type=float, default=6.0) 
     parser.add_argument("--ip", type=str, default='10.147.18.182') 
     parser.add_argument('--port', type=int, default=50000) 
-    parser.add_argument("--with_culling", action="store_true")
+    parser.add_argument("--frustum_culling", action="store_true")
     parser.add_argument('--render_dir', type=str, default="") 
     parser.add_argument("--save_log", action="store_true")
     parser.add_argument("--logs_dir", type=str, default="")
-    parser.add_argument("--test_data_dir", type=str, default="")
     parser.add_argument("--viewpointFilePath", type=str, default="")
     args = parser.parse_args(sys.argv[1:]) 
     dataset, pipe = lp.extract(args), pp.extract(args) 

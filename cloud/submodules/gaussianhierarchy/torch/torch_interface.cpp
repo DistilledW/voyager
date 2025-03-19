@@ -84,6 +84,7 @@ int ExpandToSize(
 	int frame_index, int window_size,
 	torch::Tensor& world_view_transform,
 	torch::Tensor& projection_matrix, 
+	bool frustum_culling, 
 	// list for clients
 	torch::Tensor& last_frame, 
 	torch::Tensor& child_indices,
@@ -104,6 +105,7 @@ int ExpandToSize(
 		frame_index, window_size,
 		world_view_transform.contiguous().data_ptr<float>(),
 		projection_matrix.contiguous().data_ptr<float>(),
+		frustum_culling, 
 		// list for clients 
 		last_frame.contiguous().data_ptr<int>(), 
 		child_indices.contiguous().data_ptr<int>(),

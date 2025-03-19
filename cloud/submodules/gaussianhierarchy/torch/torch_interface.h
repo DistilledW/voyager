@@ -30,7 +30,7 @@ int ExpandToSize(
 	int frame_index, int window_size,
 	torch::Tensor& world_view_transform,
 	torch::Tensor& projection_matrix, 
-	// torch::Tensor& frustum_plans, 
+	bool frustum_culling, 
 	// list for clients
 	torch::Tensor& last_frame, 
 	torch::Tensor& child_indices,
