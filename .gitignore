@@ -1,23 +1,11 @@
-dataset/
-!dataset/*.py 
-!dataset/*.sh
-cloud/submodules/DPT/
-cloud/submodules/Depth-Anything-V2/
+dataset/*
+!dataset/generate_test.py
+!dataset/viewpoints.txt
+h3dgs_render
+local_test
 *__pycache__/
 *.pyc
 .vscode
-output/
 build/
-*tensorboard_3d
-*screenshots
-requirements.txt
-LICENSE_h-3dgs.md
-videoProcess/
-delete
-docker_run.sh
-
-# client/run.sh
-# cloud/run.sh
-# train/run.sh
-# train/train.sh
-# docker_run.sh
+*tensorboard_3d 
+*screenshots 

@@ -52,9 +52,7 @@ __global__ void markTargetNodes(Node* nodes, int N, int target, int* node_counts
 	node_counts[idx] = count;
 }
 
-__global__ void putRenderIndices(
-	Node* nodes, int N, int* node_counts, int* node_offsets, int* render_indices, 
-	int* parent_indices = nullptr, int* nodes_for_render_indices = nullptr)
+__global__ void putRenderIndices(Node* nodes, int N, int* node_counts, int* node_offsets, int* render_indices, int* parent_indices = nullptr, int* nodes_for_render_indices = nullptr)
 {
 	int idx = blockDim.x * blockIdx.x + threadIdx.x;
 	if (idx >= N)
@@ -507,81 +505,6 @@ void Switching::getTsIndexed(
 		ts, 
 		kids);
 }
-__forceinline__ __device__ float3 tPoint4x3(const float3& p, const float* matrix)
-{
-	float3 transformed = {
-		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
-		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
-		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
-	};
-	return transformed;
-}
-__forceinline__ __device__ float4 tPoint4x4(const float3& p, const float* matrix)
-{
-	float4 transformed = {
-		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z + matrix[12],
-		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z + matrix[13],
-		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z + matrix[14],
-		matrix[3] * p.x + matrix[7] * p.y + matrix[11] * p.z + matrix[15]
-	};
-	return transformed;
-}
-__forceinline__ __device__ bool frustumCulling(
-	float3 p_orig,
-	const float* viewmatrix,
-	const float* projmatrix)
-{
-	float4 p_hom = tPoint4x4(p_orig, projmatrix);
-	float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
-	float3 p_view = tPoint4x3(p_orig, viewmatrix);
-
-	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
-	{
-		return false;
-	}
-	return true;
-}
-
-__global__ void markNodesForSize_with_fc(Node* nodes, Box* boxes, int N, Point* viewpoint, Point zdir, float target_size, int* render_counts, int* node_markers, 
-	bool frustum_culling, float* world_view_transform, float* projection_matrix, float* means3d)
-{
-	int idx = blockDim.x * blockIdx.x + threadIdx.x;
-	if (idx >= N)
-		return;
-
-	int node_id = idx;
-	Node node = nodes[node_id];
-	float size = computeSizeGPU(boxes[node_id], *viewpoint, zdir);
-	int index = node.start;
-	if (frustum_culling){
-		float3 p_orig = { means3d[3 * index], means3d[3 * index + 1], means3d[3 * index + 2] };
-		bool ret = frustumCulling(p_orig, world_view_transform, projection_matrix);
-		if (!ret){
-			render_counts[node_id] = 0;
-			return ;
-		}
-	}
-	int count = 0;
-	if (size >= target_size)
-		count = node.count_leafs;
-	else if (node.parent != -1)
-	{
-		float parent_size = computeSizeGPU(boxes[node.parent], *viewpoint, zdir);
-		if (parent_size >= target_size)
-		{
-			count = node.count_leafs;
-			if (node.depth != 0)
-				count += node.count_merged;
-		}
-	}
-
-	if (count != 0 && node_markers != nullptr)
-		node_markers[node_id] = 1;
-
-	if (render_counts != nullptr)
-		render_counts[node_id] = count;
-}
 
 int Switching::expandToSize(
 	int N,
@@ -593,11 +516,7 @@ int Switching::expandToSize(
 	int* render_indices,
 	int* node_markers,
 	int* parent_indices,
-	int* nodes_for_render_indices, 
-	bool frustum_culling,
-	float* world_view_transform, 
-	float* projection_matrix, 
-	float* means3d)
+	int* nodes_for_render_indices)
 {
 	size_t temp_storage_bytes;
 	thrust::device_vector<char> temp_storage;
@@ -607,8 +526,7 @@ int Switching::expandToSize(
 	Point zdir = { x, y, z };
 
 	int num_blocks = (N + 255) / 256;
-	markNodesForSize_with_fc << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers, 
-		frustum_culling, world_view_transform, projection_matrix, means3d);
+	markNodesForSize << <num_blocks, 256 >> > ((Node*)nodes, (Box*)boxes, N, (Point*)viewpoint, zdir, target_size, render_counts.data().get(), node_markers);
 
 	cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, render_counts.data().get(), render_offsets.data().get(), N);
 	temp_storage.resize(temp_storage_bytes);

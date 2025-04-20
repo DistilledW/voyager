@@ -35,12 +35,7 @@ public:
 		int* render_indices,
 		int* node_markers,
 		int* parent_indices = nullptr,
-		int* nodes_for_render_indices=nullptr, 
-		bool frustum_culling = false,
-		float* world_view_transform=nullptr, 
-		float* projection_matrix=nullptr, 
-		float* means3d=nullptr
-		);
+		int* nodes_for_render_indices=nullptr);
 
 	static void getTsIndexed(
 		int N,

@@ -5,7 +5,7 @@ CHUNKS=${DATASET}/camera_calibration/chunks
 OUTPUT=${DATASET}/output 
 DATE=250315 
 # RENDER_DIR=${DATASET}/renders/train/test # ${DATE} 
-RECTIFIED=../rectified 
+RECTIFIED=${DATASET}/camera_calibration/rectified 
 LOG_DIR=${CODE}/dataset/logs 
 
 # conda activate check 
@@ -45,31 +45,11 @@ for i in "${!TARGETS[@]}"; do
         echo "$PACKAGE is already installed"
     fi
 done 
-
-# cp vgg * 
-VGG_SOURCE_DIR="${CODE}/dataset/vgg"
-VGG_DESTINATION="/root/.cache/torch/hub/checkpoints" 
-VGG_FILES=("vgg.pth" "vgg16-397923af.pth") 
-mkdir -p "${VGG_SOURCE_DIR}"
-mkdir -p "${VGG_DESTINATION}"
-for vgg_file in "${VGG_FILES[@]}"; do 
-    if [ ! -e "${VGG_SOURCE_DIR}/${vgg_file}" ]; then 
-        wget -O "${VGG_SOURCE_DIR}/${vgg_file}" http://10.147.18.182/${vgg_file} 
-    fi 
-    if [ -e "${VGG_SOURCE_DIR}/${vgg_file}" ] && [ ! -e "${VGG_DESTINATION}/${vgg_file}" ]; then
-        cp "${VGG_SOURCE_DIR}/${vgg_file}" "${VGG_DESTINATION}/${vgg_file}" 
-    fi 
-done 
-# cp test.txt 
-
-# render 
-# taus=(0.0 3.0 6.0 9.0 12.0 15.0 18.0 21.0 24.0 27.0 30.0)
-
-taus_1=(0.0 6.0 12.0 18.0 24.0)
-taus_2=(3.0 9.0 15.0 21.0 27.0 30.0)
+taus=(0.0 3.0 6.0 9.0 12.0 15.0 18.0 21.0 24.0 27.0 30.0) 
+Test=(6.0) 
 CURR_LOG_DIR="${LOG_DIR}/render_logs/train/get_gs_point_number_with_fc" # ${DATE}
 mkdir -p "$CURR_LOG_DIR"
-for tau in "${taus_1[@]}"; do 
+for tau in "${taus[@]}"; do 
     # LOG_FILE="${CURR_LOG_DIR}/${tau}.log"
     python render_hierarchy.py \
     --source_path ${ALIGNED} \

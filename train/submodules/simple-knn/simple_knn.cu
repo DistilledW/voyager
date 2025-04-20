@@ -193,10 +193,8 @@ void SimpleKNN::knn(int P, float3* points, float* meanDists)
 
 	cub::DeviceReduce::Reduce(nullptr, temp_storage_bytes, points, result, P, CustomMin(), init);
 	thrust::device_vector<char> temp_storage(temp_storage_bytes);
-
 	cub::DeviceReduce::Reduce(temp_storage.data().get(), temp_storage_bytes, points, result, P, CustomMin(), init);
 	cudaMemcpy(&minn, result, sizeof(float3), cudaMemcpyDeviceToHost);
-
 	cub::DeviceReduce::Reduce(temp_storage.data().get(), temp_storage_bytes, points, result, P, CustomMax(), init);
 	cudaMemcpy(&maxx, result, sizeof(float3), cudaMemcpyDeviceToHost);
 
@@ -210,7 +208,6 @@ void SimpleKNN::knn(int P, float3* points, float* meanDists)
 
 	cub::DeviceRadixSort::SortPairs(nullptr, temp_storage_bytes, morton.data().get(), morton_sorted.data().get(), indices.data().get(), indices_sorted.data().get(), P);
 	temp_storage.resize(temp_storage_bytes);
-
 	cub::DeviceRadixSort::SortPairs(temp_storage.data().get(), temp_storage_bytes, morton.data().get(), morton_sorted.data().get(), indices.data().get(), indices_sorted.data().get(), P);
 
 	uint32_t num_boxes = (P + BOX_SIZE - 1) / BOX_SIZE;

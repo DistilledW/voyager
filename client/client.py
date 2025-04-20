@@ -20,10 +20,11 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 import torchvision
 from lpipsPyTorch import lpips
 
-from gaussian_hierarchy._C import force_search
+from subgraph_expand._C import subgraph_tree_init, subgraph_expand, subgraph_update 
+from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer 
+
 # server-client 
 from multiprocessing.reduction import send_handle, recv_handle 
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer 
 import torch.multiprocessing as mp 
 from multiprocessing import Event, queues 
 import numpy as np 
@@ -35,6 +36,7 @@ import ast
 import zlib  
 from PIL import Image
 import struct
+from tqdm import tqdm
 
 class client_Camera:
     def __init__(self, FoVx:float, FoVy:float, image_height:int, image_width:int, world_view_transform:torch.Tensor, 
@@ -64,12 +66,14 @@ class client_Camera:
         })
 
 class client:
-    def __init__(self, manager, tau=6.0):    
+    def __init__(self, manager, tau=6.0, ws = 10): 
         self.shared_data = manager.dict({
-            "tau": tau
+            "tau": tau,
+            "window_size" : ws,
+            "interpolation_number" : 15
         }) 
 
-    def send(self, end_signal, send_start_signal, camera_queue, child_con, viewpointFilePath, buffer_size=10240): 
+    def send(self, end_signal, render_isOk, receive_isOk, camera_queue, child_con, viewpointFilePath, buffer_size=10240): 
         fd = recv_handle(child_con) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
         objects = [] 
@@ -94,19 +98,19 @@ class client:
                                         projection_matrix, full_proj_transform, image_name, camera_center, timestamp)
                 objects.append(camera_obj)
                 i += 9  # 每组数据有 9 行 
-        # 按 image_name 排序
+        # 按 image_name 排序 
         objects.sort(key=lambda x: x.image_name) 
-        # print("viewpoints is read successully, need to wait until until rendering process start.") 
-        send_start_signal.wait()
+        connection.sendall(struct.pack("f", self.shared_data["tau"])) 
+        connection.sendall(struct.pack("i", self.shared_data["window_size"])) 
+        code = 0 
+        receive_isOk.wait() 
         print("===========================================================")
         print(f"Sending process start.")
-        code = 1 # 发送tau 值
-        connection.sendall(code.to_bytes(4, byteorder='big')) 
-        connection.sendall(struct.pack("f", self.shared_data["tau"])) 
-        code = 0 
         for idx, obj in enumerate(objects): 
             if end_signal.is_set():
                 break 
+            if idx >= 1: 
+                render_isOk.wait()
             connection.sendall(code.to_bytes(4, byteorder='big')) 
             message = obj.serialize().encode('utf-8') 
             data_size = len(message) 
@@ -124,126 +128,170 @@ class client:
                     break 
             camera_queue.put(obj) 
             print(f"Send viewpoint[{idx}] sucessfully") 
-            time.sleep(1) 
-        end_signal.wait()
-    def receive(self, end_signal, queue, child_conn, buffer_size=10240): 
+            time.sleep(1)
+        end_signal.wait() 
+    def receiveOne(self, connection, buffer_size = 10240):
+        dat = connection.recv(4) 
+        if dat == b'': 
+            return torch.empty(), -1 
+        message_length = int.from_bytes(dat, byteorder='big') 
+        message = b"" 
+        digit_count = 0
+        if message_length > 1000000:
+            digit_count = len(str(message_length)) - 6
+            buffer_size = 1024 * pow(10, digit_count)
+            # print(digit_count, buffer_size, message_length ) 
+        progress_bar = tqdm(total=message_length, desc="Receiving", unit="B", unit_scale=True)
+        
+        while len(message) < message_length:
+            chunk = connection.recv(min(buffer_size, message_length - len(message))) 
+            if not chunk:
+                progress_bar.close()
+                return torch.empty(), -1 
+            message += chunk 
+            progress_bar.update(len(chunk)) 
+        decompressed = zlib.decompress(message) 
+        return pickle.loads(decompressed), 0 
+    
+    def receive(self, end_signal, receive_isOk, queue, child_conn, args, buffer_size=10240): 
         fd = recv_handle(child_conn) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
         frame_index = 1 # 第一帧数据跳过 
-        parameter_number = 14 
+        parameter_number = 2 
         print("===========================================================")
         print("Receive process start.")
+        depth_count, _ = self.receiveOne(connection, buffer_size) 
+        queue.put(depth_count) 
+        data = connection.recv(4)
+        if data: # pointNumber
+            queue.put(struct.unpack('!i', data)[0])
+        else:
+            end_signal.set() 
+        data = connection.recv(4)
+        if data: # opacity min
+            queue.put(struct.unpack('!f', data)[0])
+        else:
+            end_signal.set() 
+        data = connection.recv(4)
+        if data: # opacity max 
+            queue.put(struct.unpack('!f', data)[0])
+        else:
+            end_signal.set() 
+        if args.local:
+            print("Receive skybox")
+            for i in range(5): # means3D, opacity, rotations, scales, shs 
+                tensor, _ = self.receiveOne(connection, buffer_size)
+                if _ < 0:
+                    end_signal.set()
+                    break 
+                queue.put(tensor) 
+        data = connection.recv(1024).decode() 
+        if data == "START":
+            receive_isOk.set()
+        else:
+            end_signal.set() 
         while not end_signal.is_set(): 
             try: 
                 frame_index += 1 
-                # i = 0 
-                # 性能测试 to fix 
-                start_time = time.time() 
-                for idx in range(parameter_number):
-                    str = connection.recv(4) 
-                    message_length = int.from_bytes(str, byteorder='big') 
-                    if str == b'': 
-                        end_signal.set() 
-                        break 
-                    message = b"" 
-                    while len(message) < message_length and not end_signal.is_set():
-                        chunk = connection.recv(min(buffer_size, message_length - len(message)))  # 每次最多接收1024字节
-                        if not chunk:
-                            end_signal.set() 
-                            break 
-                        message += chunk 
+                # start_time = time.time() 
+                for _ in range(parameter_number):
                     if end_signal.is_set():
                         break 
-                    decompressed = zlib.decompress(message) 
-                    tensor = pickle.loads(decompressed) 
+                    tensor, ret = self.receiveOne(connection, buffer_size) 
+                    if ret < 0:
+                        end_signal.set() 
+                        break 
                     queue.put(tensor) 
-                # 性能测试 to fix 
-                end_time = time.time() 
-                execution_time = end_time - start_time 
+                # end_time = time.time() 
+                # execution_time = end_time - start_time 
                 # print(f"Read time = {execution_time}s, frame index = {frame_index}") 
-                time.sleep(1)
+                time.sleep(1) 
             except Exception as e: 
                 print("Receive exception: ", e) 
                 end_signal.set() 
                 break 
-        end_signal.wait()
+        end_signal.wait() 
     def check_size(self, s1:int, s2:int, s3:int, s4:int, s5:int, s6:int):
         if (s1 != s2 or s3 != s4 or s5!=s6):
             return False
         elif (s1 != s3 or s1!=s5):
             return False
         return True
-    @torch.no_grad()
-    def render(self, end_signal, send_start_signal, queue, camera_queue, dataset, pipe, args):
-        # create output folder if it doesn't exit  
-        if not os.path.exists(args.render_dir):
-            os.makedirs(args.render_dir)
-            print(f"Create folder {args.render_dir}.")
-        # send_start_signal.set() 
-        # return 
+    @torch.no_grad() 
+    def render(self, end_signal, render_isOk, queue, camera_queue, dataset, pipe, args):
         torch.cuda.init() 
-        torch.cuda.set_device(torch.cuda.current_device())
-        # 第一帧数据作为起始数据 
-        # child 
-        tensors = [] 
-        tensor_directory = f"../dataset/first_frame/without/{self.shared_data['tau']}" 
-        if args.frustum_culling:
-            tensor_directory = f"../dataset/first_frame/with/{self.shared_data['tau']}" 
-        for i in range(14): 
-            tensors.append(torch.load(os.path.join(tensor_directory, f"{i}.pt"), weights_only=True))        
-        child_means3D = tensors[0].cuda()
-        child_rotations = tensors[1].cuda()
-        child_opacity = tensors[2].cuda()
-        child_scales = tensors[3].cuda()
-        child_shs = tensors[4].cuda()
-        child_boxes = tensors[5].cuda()
-        
-        # parent 
-        parent_means3D = tensors[6].cuda()
-        parent_rotations = tensors[7].cuda()
-        parent_opacity = tensors[8].cuda()
-        parent_scales = tensors[9].cuda()
-        parent_shs = tensors[10].cuda()
-        parent_boxes = tensors[11].cuda() 
-        leafs_tag = tensors[12].cuda() 
-        num_siblings = tensors[13].cuda()
+        torch.cuda.set_device(torch.cuda.current_device()) 
+        # return 
+        # initialize 
+        depth_count     = queue.get() 
+        pointNumber     = queue.get() 
+        opacity_min     = queue.get() 
+        opacity_max     = queue.get() 
+        range           = (opacity_max - opacity_min) / 255.0 
         # skybox:
-        sky_box_means3d = torch.load(os.path.join("../dataset/skybox/means3d.pt"), weights_only=True).cuda()
-        sky_box_opacity = torch.load(os.path.join("../dataset/skybox/opacity.pt"), weights_only=True).cuda()
-        sky_box_shs = torch.load(os.path.join("../dataset/skybox/shs.pt"), weights_only=True).cuda()
-        sky_box_scales = torch.load(os.path.join("../dataset/skybox/scales.pt"), weights_only=True).cuda()
-        sky_box_rotations = torch.load(os.path.join("../dataset/skybox/rotations.pt"), weights_only=True).cuda()
-
-        # 初始化中间变量： 
-        frame_index = 0 
-        render_indices = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda() 
-        parent_indices = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda() 
-        nodes_for_render_indices = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda() 
-        interpolation_weights = torch.zeros(child_means3D.size(0), dtype=torch.float32).cuda() 
-        last_frame = torch.zeros(child_means3D.size(0), dtype=torch.int).cuda()
-
+        if args.local:
+            sky_box_means3d     = queue.get().cuda()
+            sky_box_opacity     = queue.get().cuda()
+            sky_box_rotations   = queue.get().cuda()
+            sky_box_scales      = queue.get().cuda()
+            sky_box_shs         = queue.get().cuda()
+        else:
+            sky_box_means3d     = torch.load(os.path.join("../dataset/skybox/means3d.pt"), weights_only=True).cuda() 
+            sky_box_opacity     = torch.load(os.path.join("../dataset/skybox/opacity.pt"), weights_only=True).cuda() 
+            sky_box_shs         = torch.load(os.path.join("../dataset/skybox/shs.pt"), weights_only=True).cuda() 
+            sky_box_scales      = torch.load(os.path.join("../dataset/skybox/scales.pt"), weights_only=True).cuda() 
+            sky_box_rotations   = torch.load(os.path.join("../dataset/skybox/rotations.pt"), weights_only=True).cuda()
+        
+        compressed_data = queue.get().cuda() 
+        sizes           = queue.get().cuda() 
+        # compressed_data = torch.load("../dataset/compressed_data.pt").cuda() 
+        # sizes = torch.load("../dataset/sizes.pt").cuda() 
+        length_size = sizes.size(0) * 2 
+        print(f"Length = {sizes.size(0)}") 
+        means3D         = torch.zeros(length_size, 3, dtype=torch.float).cuda() 
+        opacities       = torch.zeros(length_size, 1, dtype=torch.float).cuda() 
+        rotations       = torch.zeros(length_size, 4, dtype=torch.float).cuda() 
+        scales          = torch.zeros(length_size, 3, dtype=torch.float).cuda() 
+        shs             = torch.zeros(length_size, 16, 3, dtype=torch.float).cuda() 
+        boxes           = torch.zeros(length_size, 2, 4, dtype=torch.float).cuda() 
+        num_siblings    = torch.zeros(length_size, dtype=torch.int).cuda() 
+        
+        render_indices  = torch.zeros(length_size, dtype=torch.int).cuda() 
+        least_recently  = torch.empty(length_size, dtype=torch.int).cuda()
+        length_size_half = sizes.size(0) 
+        least_recently[:length_size_half] = 0 
+        least_recently[length_size_half:] = 100 
+        # return 
+        nodes = torch.full((pointNumber, 2), -1, dtype=torch.int).cuda() 
+        
+        print("Tree initialize") 
+        featureMaxx = subgraph_tree_init(
+            compressed_data, sizes, 
+            nodes, means3D, opacities, rotations, scales, shs, 
+            boxes, num_siblings, 
+            opacity_min, range
+        ) 
+        print(featureMaxx, flush=True) 
         # Evaluation 
-        psnr_test = 0.0 
-        ssims = 0.0 
-        lpipss = 0.0 
-        overTime = 0 
-        window_size = 10 
+        psnr_test   = 0.0 
+        ssims       = 0.0 
+        lpipss      = 0.0 
+        overTime    = 0 
         print("===========================================================") 
-        print(f"Rendering process start:: {child_means3D.size()}")
+        print(f"Rendering process start:: ", flush=True) 
         if args.frustum_culling:
             log_path = os.path.join(args.logs_dir, "with", f"{self.shared_data['tau']}.log")
         else:
             log_path = os.path.join(args.logs_dir, "without", f"{self.shared_data['tau']}.log")
-
-        send_start_signal.set() 
+        render_isOk.set() 
+        frame_index = 0 
+        preview = camera_queue.get() 
+        # create output folder if it doesn't exit  
+        if not os.path.exists(args.render_dir):
+            os.makedirs(args.render_dir)
+            print(f"Create folder {args.render_dir}.")
         while not end_signal.is_set(): 
-            if (not self.check_size(child_means3D.size(0), child_rotations.size(0), child_opacity.size(0), child_scales.size(0), child_shs.size(0), child_boxes.size(0)) or (not self.check_size(parent_means3D.size(0), parent_rotations.size(0), parent_opacity.size(0), parent_scales.size(0), parent_shs.size(0), parent_boxes.size(0))) or child_means3D.size(0) != parent_means3D.size(0) or child_means3D.size(0) != leafs_tag.size(0)):
-                print("Size Error") 
-                print(child_means3D.size(0), child_rotations.size(0), child_opacity.size(0), child_scales.size(0), child_shs.size(0), child_boxes.size(0), 
-                      parent_means3D.size(0), parent_rotations.size(0), parent_opacity.size(0), parent_scales.size(0), parent_shs.size(0), parent_boxes.size(0), 
-                      leafs_tag.size(0))
-                break 
-            # 1. 这里应该从viewpoint队列里面获取一个视点 
+            viewpoint = None
             try:
                 viewpoint = camera_queue.get(timeout=5) 
             except queues.Empty: 
@@ -257,7 +305,22 @@ class client:
             except Exception as e:
                 print("Render exception[1]: ", e) 
                 break 
+            # viewpoints = generate(preview, currentview)
+            # for viewpoint in viewpoints:
+            # update subgraph of the BFS-tree 
+            if viewpoint is None:
+                continue
             overTime = 0 
+            compressed_data = queue.get().cuda() 
+            sizes = queue.get().cuda() 
+            # print("Update tree start")
+            featureMaxx, update_elapse = subgraph_update( 
+                compressed_data, sizes, 
+                nodes, means3D, opacities, rotations, scales, shs, boxes, num_siblings, 
+                least_recently, self.shared_data["window_size"], opacity_min, range, featureMaxx
+            ) 
+            # print("Update tree end", featureMaxx, f"{update_elapse:.5f}") 
+            
             viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
             viewpoint.projection_matrix = viewpoint.projection_matrix.cuda() 
             viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
@@ -267,47 +330,31 @@ class client:
             tanfovx = math.tan(viewpoint.FoVx * 0.5) 
             tanfovy = math.tan(viewpoint.FoVy * 0.5) 
             threshold = (2 * (self.shared_data["tau"] + 0.5)) * tanfovx / (0.5 * viewpoint.image_width) 
-            # print("force_search") 
-            to_render = force_search( 
-                child_boxes, 
-                parent_boxes, 
-                child_means3D, 
+            print("subgraph_expand") 
+            to_render, expand_elapse = subgraph_expand( 
+                nodes, 
+                depth_count, 
+                means3D, 
+                boxes, 
                 threshold, 
                 viewpoint.camera_center, 
                 args.frustum_culling, 
                 viewpoint.world_view_transform, 
                 viewpoint.projection_matrix, 
-                torch.zeros((3)), 
-                leafs_tag, 
-                # output 
-                last_frame, 
-                render_indices, 
-                interpolation_weights) 
-            print("out of force_search:: ", to_render) 
+                least_recently, 
+                render_indices 
+            ) 
+            print("out of subgraph_expand:: ", to_render, f"{expand_elapse:.5f}") 
             # 3. render 
-            # 计算插值 
-            indices = render_indices[:to_render].int().contiguous() 
-            num_node_kids = torch.cat([num_siblings, torch.ones(sky_box_means3d.size(0), dtype=torch.int).cuda()], dim = 0) 
-            interps = interpolation_weights[:to_render].unsqueeze(1) 
-            interps_inv = (1 - interpolation_weights[:to_render]).unsqueeze(1) 
-            means3D_base = (interps * child_means3D[indices] + interps_inv * parent_means3D[indices]).contiguous() 
-            scales_base = (interps * child_scales[indices] + interps_inv * parent_scales[indices]).contiguous() 
-            shs_base = (interps.unsqueeze(2) * child_shs[indices] + interps_inv.unsqueeze(2) * parent_shs[indices]).contiguous() 
-            opacity_base = (interps * child_opacity[indices] + interps_inv * parent_opacity[indices]).contiguous() 
+            indices = render_indices[:to_render] 
+            mea = torch.cat([means3D[indices], sky_box_means3d], dim = 0).contiguous() 
+            sca = torch.cat([scales[indices], sky_box_scales], dim = 0).contiguous() 
+            rot = torch.cat([rotations[indices], sky_box_rotations], dim = 0).contiguous() 
+            sh = torch.cat([shs[indices], sky_box_shs], dim = 0).contiguous() 
+            opa = torch.cat([opacities[indices], sky_box_opacity], dim = 0).contiguous() 
+            num_node_kids = torch.cat([num_siblings[indices], torch.ones(sky_box_means3d.size(0), dtype=torch.int).cuda()], dim = 0).contiguous() 
 
-            parents_rots = parent_rotations[indices] 
-            child_rots = child_rotations[indices] 
-            dots = torch.bmm(child_rots.unsqueeze(1), parents_rots.unsqueeze(2)).flatten() 
-            parents_rots[dots < 0] *= -1 
-            rotations_base = ((interps * child_rots) + interps_inv * parents_rots).contiguous() 
-
-            means3d = torch.cat([means3D_base, sky_box_means3d], dim = 0).contiguous() 
-            scales = torch.cat([scales_base, sky_box_scales], dim = 0).contiguous() 
-            rotations = torch.cat([rotations_base, sky_box_rotations], dim = 0).contiguous() 
-            shs = torch.cat([shs_base, sky_box_shs], dim = 0).contiguous() 
-            opacity = torch.cat([opacity_base, sky_box_opacity], dim = 0).contiguous() 
-            # 渲染 
-            raster_settings = GaussianRasterizationSettings(
+            raster_settings = GaussianRasterizationSettings( 
                 image_height=int(viewpoint.image_height),
                 image_width=int(viewpoint.image_width),
                 tanfovx=tanfovx,
@@ -322,33 +369,42 @@ class client:
                 debug=pipe.debug,
                 render_indices=torch.Tensor([]).int(),
                 parent_indices=torch.Tensor([]).int(),
-                interpolation_weights=interpolation_weights,
+                interpolation_weights=torch.Tensor([]).float(), 
                 num_node_kids = num_node_kids, 
                 do_depth=False 
             ) 
-            rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-            image, _, _ = rasterizer( 
-                means3D = means3d,
+            rasterizer = GaussianRasterizer(raster_settings=raster_settings) 
+            image, num_rendered, elapse, elapse_breakdown = rasterizer( 
+                means3D = mea,
                 means2D = None,
-                opacities = opacity,
-                shs = shs,
-                scales = scales,
-                rotations = rotations) 
-            image = image.clamp(0.0, 1.0) 
-            alpha_mask_path = os.path.join(args.alpha_masks, f"{viewpoint.image_name.rsplit('.', 1)[0]}.png")
-            pil_alpha_mask = Image.open(alpha_mask_path) 
-            alpha_mask = (torch.from_numpy(np.array(pil_alpha_mask)) / 255.0).cuda()
+                opacities = opa,
+                shs = sh,
+                scales = sca,
+                rotations = rot
+            ) 
+            image = torch.clamp(image, 0.0, 1.0) 
+            
+            pil_alpha_mask = Image.open(os.path.join(args.alpha_masks, f"{viewpoint.image_name.rsplit('.', 1)[0]}.png")) 
+            alpha_mask = (torch.from_numpy(np.array(pil_alpha_mask)).to(torch.uint8) / 255.0).cuda()
             alpha_mask = alpha_mask.unsqueeze(dim=-1).permute(2, 0, 1)
             
             pil_gt_image = Image.open(os.path.join(args.images, viewpoint.image_name))
-            gt_image = (torch.from_numpy(np.array(pil_gt_image)) / 255.0).cuda()
+            gt_image = (torch.from_numpy(np.array(pil_gt_image)).to(torch.uint8) / 255.0).cuda()
             gt_image = gt_image.permute(2, 0, 1)
             
-            # try:
-            #     torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
-            # except:
-            #     os.makedirs(os.path.dirname(os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
-            #     torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
+            pil_alpha_mask.close() 
+            pil_gt_image.close()
+            
+            if args.train_test_exp:
+                image = image[..., image.shape[-1] // 2:]
+                gt_image = gt_image[..., gt_image.shape[-1] // 2:]
+                alpha_mask = alpha_mask[..., alpha_mask.shape[-1] // 2:]
+
+            try:
+                torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
+            except:
+                os.makedirs(os.path.dirname(os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
+                torchvision.utils.save_image(image, os.path.join(args.render_dir, viewpoint.image_name.split(".")[0] + ".png"))
             if args.eval:
                 image *= alpha_mask 
                 gt_image *= alpha_mask 
@@ -358,67 +414,9 @@ class client:
                 psnr_test += psnr_test_ 
                 ssims += ssims_ 
                 lpipss += lpipss_ 
-                with open(log_path, "a+") as fout:
-                    fout.write(f"{viewpoint.image_name}: {to_render}, {psnr_test_}, {ssims_}, {lpipss_}\n") 
-                print(f"frame_index = {frame_index}, to_render={to_render}, psnr_avg = {psnr_test / frame_index}, ssim_avg = {ssims / frame_index}, lpips_avg = {lpipss / frame_index}")
-            # 4. 每隔一段时间，删掉一部分数据集中很久没有用到的高斯点 
-            if frame_index % 10 == 0:
-                number_of_delete_points = child_means3D.size(0) 
-                # last_frame 中大于阈值的所有数据都剔除 
-                masks = last_frame < window_size 
-                # child 136 * 4 = 544 Bytes * 20 k = 10.880 MB/s 没有压缩！ 
-                child_means3D = child_means3D[masks].contiguous() # 3
-                child_rotations = child_rotations[masks].contiguous() # 4 
-                child_opacity = child_opacity[masks].contiguous() # 1 
-                child_scales = child_scales[masks].contiguous() # 3
-                child_shs = child_shs[masks].contiguous() # 16 * 3 
-                child_boxes = child_boxes[masks].contiguous() # 4 * 2 
-                # parent 
-                parent_means3D = parent_means3D[masks].contiguous() 
-                parent_rotations = parent_rotations[masks].contiguous() 
-                parent_opacity = parent_opacity[masks].contiguous() 
-                parent_scales = parent_scales[masks].contiguous() 
-                parent_shs = parent_shs[masks].contiguous() 
-                parent_boxes = parent_boxes[masks].contiguous() 
-                # others 
-                leafs_tag = leafs_tag[masks].contiguous() # 1 
-                num_siblings = num_siblings[masks].contiguous() # 1 
-                
-                # 修改临时变量的长度: 
-                render_indices = render_indices[:child_means3D.size(0)].contiguous() 
-                parent_indices = parent_indices[:child_means3D.size(0)].contiguous() 
-                nodes_for_render_indices = nodes_for_render_indices[:child_means3D.size(0)].contiguous() 
-                interpolation_weights = interpolation_weights[:child_means3D.size(0)].contiguous() 
-                last_frame = last_frame[masks].contiguous() 
-                # for debug 
-                number_of_delete_points = number_of_delete_points - child_means3D.size(0) 
-                print("Delete points: ", number_of_delete_points) 
-                # torch.cuda.empty_cache() 
-                pass 
-            # 5. 将新接收到的高斯点加入到数据集中 
-            # child 
-            child_means3D = torch.cat([child_means3D, queue.get().cuda()], dim = 0)
-            child_rotations = torch.cat([child_rotations, queue.get().cuda()], dim = 0)
-            child_opacity  = torch.cat([child_opacity, queue.get().cuda()], dim = 0)
-            child_scales  = torch.cat([child_scales, queue.get().cuda()], dim = 0)
-            child_shs  = torch.cat([child_shs, queue.get().cuda()], dim = 0) 
-            child_boxes  = torch.cat([child_boxes, queue.get().cuda()], dim = 0)
-            # parent 
-            parent_means3D = torch.cat([parent_means3D, queue.get().cuda()], dim = 0)
-            parent_rotations = torch.cat([parent_rotations, queue.get().cuda()], dim = 0)
-            parent_opacity = torch.cat([parent_opacity, queue.get().cuda()], dim = 0)
-            parent_scales = torch.cat([parent_scales, queue.get().cuda()], dim = 0)
-            parent_shs = torch.cat([parent_shs, queue.get().cuda()], dim = 0)
-            parent_boxes = torch.cat([parent_boxes, queue.get().cuda()], dim = 0)
-            leafs_tag = torch.cat([leafs_tag, queue.get().cuda()], dim = 0)
-            num_siblings = torch.cat([num_siblings, queue.get().cuda()], dim = 0)
-            # 补充临时变量 
-            addition = child_means3D.size(0) - render_indices.size(0) 
-            render_indices = torch.cat([render_indices, torch.zeros(addition, dtype=torch.int).cuda()], dim = 0)
-            parent_indices = torch.cat([parent_indices, torch.zeros(addition, dtype=torch.int).cuda()], dim = 0)
-            nodes_for_render_indices = torch.cat([nodes_for_render_indices, torch.zeros(addition, dtype=torch.int).cuda()], dim = 0)
-            interpolation_weights = torch.cat([interpolation_weights, torch.zeros(addition, dtype=torch.int).cuda()], dim = 0)
-            last_frame = torch.cat([last_frame, torch.zeros(addition, dtype=torch.int).cuda()], dim = 0) 
+                # with open(log_path, "a+") as fout:
+                #     fout.write(f"{viewpoint.image_name}: {to_render}, {psnr_test_}, {ssims_}, {lpipss_}\n") 
+                print(f"frame_index = {frame_index}, to_render={to_render}, psnr_avg = {psnr_test_}, ssim_avg = {ssims_}, lpips_avg = {lpipss_}", flush=True) 
         end_signal.wait() 
 # single: 10.147.18.182 
 # four:   47.116.170.43 
@@ -437,6 +435,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_log", action="store_true")
     parser.add_argument("--logs_dir", type=str, default="")
     parser.add_argument("--viewpointFilePath", type=str, default="")
+    parser.add_argument("--tt_mode", type=int, default=0) 
+    parser.add_argument("--local", action="store_true")
     args = parser.parse_args(sys.argv[1:]) 
     dataset, pipe = lp.extract(args), pp.extract(args) 
     # client 
@@ -451,12 +451,13 @@ if __name__ == "__main__":
     parent_conn1, child_conn1 = mp.Pipe() # 通信管道 
     parent_conn2, child_conn2 = mp.Pipe() 
     end_signal = Event() 
-    send_start_signal = Event() # 预处理结束，开始发送数据 
-    c_send = mp.Process(target=c.send, args=(end_signal, send_start_signal, camera_queue, child_conn1, args.viewpointFilePath, )) 
+    render_isOk = Event() # 预处理结束，开始发送数据 
+    receive_isOk = Event() 
+    c_send = mp.Process(target=c.send, args=(end_signal, render_isOk, receive_isOk, camera_queue, child_conn1, args.viewpointFilePath, )) 
     c_send.start() 
-    c_receive = mp.Process(target=c.receive, args=(end_signal, tensor_queue, child_conn2, )) 
+    c_receive = mp.Process(target=c.receive, args=(end_signal, receive_isOk, tensor_queue, child_conn2, args, )) 
     c_receive.start() 
-    c_render = mp.Process(target=c.render, args=(end_signal, send_start_signal, tensor_queue, camera_queue, dataset, pipe, args, )) 
+    c_render = mp.Process(target=c.render, args=(end_signal, render_isOk, tensor_queue, camera_queue, dataset, pipe, args, )) 
     c_render.start() 
     send_handle(parent_conn1, client_socket.fileno(), c_send.pid) 
     send_handle(parent_conn2, client_socket.fileno(), c_receive.pid) 

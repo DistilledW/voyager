@@ -15,16 +15,16 @@ import torch
 from random import randint
 from utils.loss_utils import ssim
 import sys
-from scene import Scene, GaussianModel
+from scene import Scene, GaussianModel 
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, OptimizationParams
 # import torchvision
-from lpipsPyTorch import lpips
-from gaussian_hierarchy._C import expand_to_size
+from lpipsPyTorch import lpips 
+from flash_tree_traversal._C import reorder_nodes, flash_tree_traversal, transimission_compress
 
-# server-client
+# server-client 
 from multiprocessing.reduction import send_handle, recv_handle
 import torch.multiprocessing as mp 
 from multiprocessing import Event 
@@ -33,6 +33,8 @@ import json
 import pickle 
 import zlib 
 import struct 
+# from vector_quantize_pytorch import ResidualVQ
+
 class client_Camera:
     def __init__(self, FoVx:float, FoVy:float, image_height:int, image_width:int,world_view_transform:torch.Tensor, 
                  projection_matrix:torch.Tensor, full_proj_transform:torch.Tensor, image_name:str, camera_center:torch.Tensor, timestamp):
@@ -76,21 +78,46 @@ class client_Camera:
         )
 
 class server:
-    def __init__(self, manager):
+    def __init__(self, manager, codebook_size=64, num_quantizers=6):
         self.shared_data = manager.dict({
-            "tau": 6.0
+            "tau": 6.0,
+            "window_size" : int(10)
         })
+        # self.vq_scale = ResidualVQ(dim = 3, codebook_size = codebook_size, num_quantizers = num_quantizers, 
+        #                            commitment_weight = 0., kmeans_init = True, kmeans_iters = 1, ema_update = False, 
+        #                            learnable_codebook=True, in_place_codebook_optimizer=lambda *args, 
+        #                            **kwargs: torch.optim.Adam(*args, **kwargs, lr=0.0001)).cuda()
+        # self.vq_rotation = ResidualVQ(dim = 4, codebook_size = codebook_size, num_quantizers = num_quantizers, 
+        #                          commitment_weight = 0., kmeans_init = True, kmeans_iters = 1, ema_update = False, 
+        #                          learnable_codebook=True, in_place_codebook_optimizer=lambda *args, 
+        #                          **kwargs: torch.optim.Adam(*args, **kwargs, lr=0.0001)).cuda()
+        # self.rvq_bit = math.log2(codebook_size)
+        # self.num_quantizers = args.num_quantizers 
+        
+    def Compress(self, to_pass, render_indices, node_indices, num_siblings, 
+                 # initial data 
+                 means3D, opacities, rotations, scales, shs, boxes, 
+                 # output 
+                 compressed_data, mode):
+        # _, scale_idx, _ = self.vq_scale()           # [batch, dim, num_quantizers] = [20000, 3, 6]
+        # _, rotation_idx, _ = self.vq_rotation() 
+        # scale_codebooks = self.vq_scale.cpu().state_dict()
+        # rotation_codebooks = self.vq_rot.cpu().state_dict()
+        
+        pass 
 
-    def receive(self, end_signal, cameras_future, child_conn, buffer_size=10240):
+    def receive(self, end_signal, cameras_queue, child_conn, buffer_size=10240):
         print("===========================================================")
         print("Receive process start!")
         fd = recv_handle(child_conn) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
+        self.shared_data["tau"] = struct.unpack('f', connection.recv(4))[0] 
+        self.shared_data["window_size"] = struct.unpack('i', connection.recv(4))[0] 
         while not end_signal.is_set(): 
             try:
                 str = connection.recv(4)
                 code = int.from_bytes(str, byteorder='big')
-                if code == 0: # viewpoint
+                if code == 0: # viewpoint 
                     str = connection.recv(4) 
                     data_size = int.from_bytes(str, byteorder='big')
                     if str == b'':
@@ -108,13 +135,13 @@ class server:
                         break
                     json_data = json.loads(data.decode('utf-8'))
                     viewpoint = client_Camera.from_json(json_data)
-                    cameras_future.put(viewpoint)
-                elif code == 1:# tau 值 
-                    str = connection.recv(4)
-                    if not str:
-                        end_signal.set()
-                        break 
-                    self.shared_data["tau"] = struct.unpack('f', str)[0] 
+                    cameras_queue.put(viewpoint)
+                # elif code == 1:# tau 值 
+                #     str = connection.recv(4)
+                #     if not str:
+                #         end_signal.set()
+                #         break 
+                #     self.shared_data["tau"] = struct.unpack('f', str)[0] 
                 else:
                     print("Code error: ", code)
                     end_signal.set()
@@ -123,19 +150,74 @@ class server:
                 print("Receive exception: ", e)
                 end_signal.set()
                 break 
-        # cameras_future.close()
+        # cameras_queue.close() 
         # gc.collect()
         # torch.cuda.empty_cache()
         end_signal.wait()
         print("Quit receive.")
     
-    def send(self, end_signal, queue, child_conn, buffer_size=10240):   
+    def sendOne(self, connection, tensor=torch.empty(0), intData=0, floatData=0.0, strData = "", mode=0, buffer_size=10240):
+        if mode == 0: # send tensor 
+            data_decom = pickle.dumps(tensor)
+            message = zlib.compress(data_decom) 
+            size_com = len(message) 
+            connection.sendall(size_com.to_bytes(4, byteorder='big')) 
+            if size_com > 1000000: # 自动调整 buffer size, 在1000以内传输完成 
+                digit_count = len(str(size_com)) - 6 
+                buffer_size = 1024 * pow(10, digit_count) 
+            print(size_com, size_com/buffer_size) 
+            try:
+                for i in tqdm(range(0, size_com, buffer_size), desc="Sending", unit="B", unit_scale=True):
+                    chunk = message[i : i + buffer_size]
+                    connection.sendall(chunk)
+            except Exception as e:
+                print("Send exception: ", e)
+                return -1
+        elif mode == 1: # send int
+            try: 
+                data = struct.pack('!i', intData)
+                connection.sendall(data) 
+            except Exception as e:
+                print("Send exception: ", e) 
+                return -1 
+        elif mode == 2: # send float
+            try: 
+                data = struct.pack('!f', floatData)
+                connection.sendall(data) 
+            except Exception as e:
+                print("Send exception: ", e) 
+                return -1 
+        elif mode == 3: # send start
+            try:
+                connection.sendall(strData.encode()) 
+            except Exception as e:
+                print("Send exception: ", e) 
+                return -1 
+        else:
+            return -1 
+        return 0 
+    def send(self, end_signal, queue, child_conn, args, buffer_size=10240):   
         print("===========================================================")
         print("Send process start!") 
         fd = recv_handle(child_conn) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
-        parameter_number = 14 
+        parameter_number = 2 
         frame_index = 0 
+        if (self.sendOne(connection, tensor=queue.get(), mode=0, buffer_size=buffer_size) < 0):
+            end_signal.set() # depth_count 
+        if (self.sendOne(connection, intData=queue.get(), mode=1, buffer_size=buffer_size) < 0):
+            end_signal.set() # pointNumber 
+        if (self.sendOne(connection, floatData=queue.get(), mode=2, buffer_size=buffer_size) < 0):
+            end_signal.set() # opacity_min 
+        if (self.sendOne(connection, floatData=queue.get(), mode=2, buffer_size=buffer_size) < 0):
+            end_signal.set() # opacity_max 
+        if args.local:
+            for i in range(5):# means3D, opacity, rotations, scales, shs 
+                if (self.sendOne(connection, tensor=queue.get(), mode=0, buffer_size=buffer_size) < 0):
+                    end_signal.set() 
+        if (self.sendOne(connection, strData="START", mode=3, buffer_size=buffer_size) < 0):
+            end_signal.set() 
+        print("Send initialization is ok!") 
         while not end_signal.is_set(): 
             try:
                 viewpoint = None 
@@ -148,23 +230,9 @@ class server:
                     frame_index += 1 
                     print(f"Send [{frame_index}] start.") 
                     for i in range(parameter_number): 
-                        tensor = queue.get() 
-                        data_decom = pickle.dumps(tensor)
-                        message = zlib.compress(data_decom) 
-                        size_com = len(message) 
-                        connection.sendall(size_com.to_bytes(4, byteorder='big')) 
-                        for i in range(0, size_com, buffer_size):
-                            try: 
-                                chunk = message[i : i + buffer_size] 
-                                if not end_signal.is_set(): 
-                                    connection.sendall(chunk) 
-                                else:
-                                    print("Send process ends because of end_signal.")
-                                    break 
-                            except Exception as e:
-                                print("Send exception: ", e) 
-                                end_signal.set() 
-                                break 
+                        if (self.sendOne(connection, tensor=queue.get(), mode=0, buffer_size=buffer_size) < 0):
+                            end_signal.set() 
+                            break 
                     print(f"Send [{frame_index}] over.")
             except Exception as e:
                 print("Send exception: ", e)
@@ -175,151 +243,126 @@ class server:
         # torch.cuda.empty_cache()
         end_signal.wait()
         print("Quit send.")
+    
     @torch.no_grad() 
-    def tree_traversal(self, end_signal, dataset, pipe, cameras_future, cameras_past, queue, args):
-        print("===========================================================") 
-        print("tree traversal process start!") 
+    def tree_traversal(self, end_signal, dataset, pipe, cameras_queue, queue, args):
         torch.cuda.init() 
         torch.cuda.set_device(torch.cuda.current_device()) 
         gaussians = GaussianModel(dataset.sh_degree) 
         gaussians.active_sh_degree = dataset.sh_degree 
         scene = Scene(dataset, gaussians, resolution_scales = [1], create_from_hier=True) 
         point_number = scene.gaussians._xyz.size(0) 
-        box_number = scene.gaussians.boxes.size(0) 
-        # tag 
-        last_frame = torch.full((point_number, ), -999, dtype=torch.int).cuda() # last frame index  => int8
-        child_indices = torch.zeros(point_number, dtype=torch.int).cuda()       # child index       => 
-        parent_indices = torch.zeros(point_number, dtype=torch.int).cuda()      # parent index 
-        child_box_indices = torch.zeros(box_number, dtype=torch.int).cuda()     # child box index 
-        parent_box_indices = torch.zeros(box_number, dtype=torch.int).cuda()    # parent box index 
-        leafs_tag = torch.zeros(box_number, dtype=torch.bool).cuda()            # whether child is leaf 
-        num_siblings = torch.zeros(box_number, dtype = torch.int).cuda()        # the number of nodes' siblings 
         
-        search_means3D = scene.gaussians.get_xyz.cuda()
-        means3D = scene.gaussians.get_xyz.cpu() # 高斯球的中心坐标 
-        rotations = scene.gaussians.get_rotation.cpu() # 旋转角度 
-        opacity = scene.gaussians.get_opacity.cpu() # opacity 
-        scales = scene.gaussians.get_scaling.cpu() # 高斯球三个方向的半径 
-        shs = scene.gaussians.get_features.cpu() # 球谐函数 
-        # Tree Traversal 
+        means3D = scene.gaussians.get_xyz.cuda() 
+        opacities = scene.gaussians.get_opacity.cuda() 
+        rotations = scene.gaussians.get_rotation.cuda() 
+        scales = scene.gaussians.get_scaling.cuda() 
+        shs = scene.gaussians.get_features.cuda() 
+        
+        # tags 
+        least_recently  = torch.full((point_number, ), 100, dtype = torch.int).cuda() # last visit 
+        render_indices  = torch.zeros(point_number, dtype = torch.int).cuda() 
+        node_indices     = torch.zeros(point_number, dtype = torch.int).cuda() 
+        num_siblings    = torch.zeros(point_number, dtype = torch.int).cuda() 
+        compressed_data = torch.zeros(point_number * 270, dtype=torch.uint8).cuda() 
+        sizes           = torch.zeros(point_number, dtype=torch.uint8).cuda() 
+        
+        depth_count = torch.zeros(100, dtype=torch.int).cpu() # hope that 100 is enough 
         torch.cuda.synchronize() 
-        frame_index = 0 # 记录第几帧数据 
-        window_size = 10 # 最近的帧数据 
-        print("Tree traversal")
+        tree_height = reorder_nodes( 
+            scene.gaussians.nodes, 
+            scene.gaussians.boxes, 
+            depth_count 
+        ) 
+        # transmmit to "send" 
+        depth_count = depth_count[:tree_height].contiguous() 
+        opacity_min = torch.amin(opacities) 
+        opacity_max = torch.amax(opacities) 
+        queue.put(depth_count) 
+        queue.put(scene.gaussians.nodes.size(0)) 
+        queue.put(opacity_min) 
+        queue.put(opacity_max) 
+        inv_range = 255.0 / (opacity_max - opacity_min) 
+        # skybox 
+        if args.local:
+            if scene.gaussians.skybox_points == 0:
+                skybox_inds = torch.Tensor([]).long()
+            else:
+                skybox_inds = torch.arange(point_number - scene.gaussians.skybox_points, point_number - 1, device="cuda").long()
+            queue.put(means3D[skybox_inds].cpu().contiguous()) 
+            queue.put(opacities[skybox_inds].cpu().contiguous()) 
+            queue.put(rotations[skybox_inds].cpu().contiguous()) 
+            queue.put(scales[skybox_inds].cpu().contiguous()) 
+            queue.put(shs[skybox_inds].cpu().contiguous()) 
+        frame_index = 0 
+        print("===========================================================", flush=True) 
+        print("tree traversal process start!", flush=True) 
+        # performance_file = os.path.join("../dataset/logs", "") 
         while not end_signal.is_set():
             viewpoint = None 
             try:
-                viewpoint = cameras_future.get(timeout=3) 
+                viewpoint = cameras_queue.get(timeout=3) 
             except:
                 viewpoint = None 
                 continue 
             if viewpoint is not None: 
                 frame_index += 1 
-                print(f"Tree Traversal[{frame_index}] start:") 
-                # cameras_past.put(viewpoint) # 用于预测下一帧视点 
                 tanfovx = math.tan(viewpoint.FoVx * 0.5) 
-                threshold = (2 * (self.shared_data["tau"]  + 0.5)) * tanfovx / (0.5 * viewpoint.image_width)
-                viewpoint.camera_center = viewpoint.camera_center.cuda() 
-                viewpoint.world_view_transform = viewpoint.world_view_transform.cuda() 
-                viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
-                viewpoint.full_proj_transform = viewpoint.full_proj_transform.cuda() 
-                print("expand to size") 
-                to_pass = expand_to_size( 
-                    scene.gaussians.nodes,      # nodes 
-                    scene.gaussians.boxes,      # boxes 
-                    search_means3D,             # means 
-                    threshold,                  # pixel size 
-                    viewpoint.camera_center,    # viewpoint 
-                    torch.zeros((3)),           # viewpoint dir 
-                    frame_index,                # frame index 
-                    window_size,                # window size 
+                target_size = (2 * (self.shared_data["tau"]  + 0.5)) * tanfovx / (0.5 * viewpoint.image_width) 
+                viewpoint.camera_center         = viewpoint.camera_center.cuda() 
+                viewpoint.world_view_transform  = viewpoint.world_view_transform.cuda() 
+                viewpoint.projection_matrix     = viewpoint.projection_matrix.cuda() 
+                viewpoint.full_proj_transform   = viewpoint.full_proj_transform.cuda() 
+                print("flash_tree_traversal", flush=True) 
+                to_pass, ftt_elapse = flash_tree_traversal( 
+                    scene.gaussians.nodes, 
+                    scene.gaussians.boxes, 
+                    means3D, 
+                    target_size, 
+                    viewpoint.camera_center, 
                     viewpoint.world_view_transform, 
                     viewpoint.projection_matrix, 
                     args.frustum_culling, 
-                    # list for clients 
-                    last_frame,                 # last frame index 
-                    child_indices,              # child index 
-                    parent_indices,             # parents index 
-                    child_box_indices,          # child box index 
-                    parent_box_indices,         # parent box index 
-                    leafs_tag,                  # whether child is leaf 
-                    num_siblings)               # the number of nodes' siblings 
-                print("to pass = ", to_pass, threshold, viewpoint.camera_center) 
-                # with open("to_pass.txt", "a+") as fout:
-                #     fout.write(f"frame_index = {frame_index}, {to_pass}\n") 
-                c_indices = child_indices[:to_pass].cpu().contiguous()
-                c_box_indices = child_box_indices[:to_pass].cpu().contiguous()
-                p_indices = parent_indices[:to_pass].cpu().contiguous()
-                p_box_indices = parent_box_indices[:to_pass].cpu().contiguous()
-                # child 
-                child_means3D = means3D[c_indices].contiguous() 
-                child_rotations = rotations[c_indices].contiguous() 
-                child_opacity = opacity[c_indices].contiguous() 
-                child_scales = scales[c_indices].contiguous() 
-                child_shs = shs[c_indices].contiguous() 
-                child_boxes = scene.gaussians.boxes[c_box_indices].contiguous() 
-                
-                # parent 
-                parent_means3D = means3D[p_indices].cpu().contiguous() 
-                parent_rotations = rotations[p_indices].cpu().contiguous() 
-                parent_opacity = opacity[p_indices].cpu().contiguous() 
-                parent_scales = scales[p_indices].cpu().contiguous() 
-                parent_shs = shs[p_indices].cpu().contiguous() 
-                parent_boxes = scene.gaussians.boxes[p_box_indices].cpu().contiguous() 
-                # child is leaf ?
-                leafs = leafs_tag[:to_pass].cpu().contiguous()
-                siblings_to_render = num_siblings[:to_pass].cpu().contiguous() 
-                # child: 
-                if frame_index > 1 and to_pass > 0:
-                    # 通过queue传输给 send thread 
-                    queue.put(viewpoint) 
-                    # children 
-                    queue.put(child_means3D) 
-                    queue.put(child_rotations) 
-                    queue.put(child_opacity) 
-                    queue.put(child_scales) 
-                    queue.put(child_shs) 
-                    queue.put(child_boxes) 
-                    # parents 
-                    queue.put(parent_means3D) 
-                    queue.put(parent_rotations) 
-                    queue.put(parent_opacity) 
-                    queue.put(parent_scales) 
-                    queue.put(parent_shs) 
-                    queue.put(parent_boxes) 
-                    # others 
-                    queue.put(leafs)
-                    queue.put(siblings_to_render)
-                elif frame_index == 1 and False: 
-                    directory = f"../dataset/first_frame/without/{self.shared_data['tau']}" 
-                    if args.frustum_culling:
-                        directory = f"../dataset/first_frame/with/{self.shared_data['tau']}"
-                    os.makedirs(directory, exist_ok=True) 
-                    torch.save(child_means3D, os.path.join(directory, "0.pt"))
-                    torch.save(child_rotations, os.path.join(directory, "1.pt"))
-                    torch.save(child_opacity, os.path.join(directory, "2.pt"))
-                    torch.save(child_scales, os.path.join(directory, "3.pt"))
-                    torch.save(child_shs, os.path.join(directory, "4.pt"))
-                    torch.save(child_boxes, os.path.join(directory, "5.pt"))
-                    torch.save(parent_means3D, os.path.join(directory, "6.pt"))
-                    torch.save(parent_rotations, os.path.join(directory, "7.pt"))
-                    torch.save(parent_opacity, os.path.join(directory, "8.pt"))
-                    torch.save(parent_scales, os.path.join(directory, "9.pt"))
-                    torch.save(parent_shs, os.path.join(directory, "10.pt"))
-                    torch.save(parent_boxes, os.path.join(directory, "11.pt"))
-                    torch.save(leafs, os.path.join(directory, "12.pt"))
-                    torch.save(siblings_to_render, os.path.join(directory, "13.pt"))
-                    print("Save over!")
-                    return 
+                    self.shared_data["window_size"], 
+                    least_recently, 
+                    render_indices, 
+                    node_indices, 
+                    num_siblings, 
+                    args.tt_mode 
+                ) 
+                print(f"idx = {frame_index}, to pass = ", to_pass, ftt_elapse, flush=True) 
+                compress_size, tc_elapse = transimission_compress( 
+                    # input parameters 
+                    to_pass, 
+                    render_indices, 
+                    node_indices, 
+                    num_siblings, 
+                    # initial data 
+                    means3D, 
+                    opacities, 
+                    rotations, 
+                    scales, 
+                    shs, 
+                    scene.gaussians.boxes, 
+                    # output 
+                    compressed_data,
+                    sizes, 
+                    opacity_min, inv_range 
+                ) 
+                print(f"Compress Rate Equals {compress_size*100.0/(to_pass * 270):.2f}%, {tc_elapse}", flush=True) 
+                # if frame_index > 1:
+                queue.put(viewpoint) 
+                queue.put(compressed_data[:compress_size].cpu().contiguous()) 
+                queue.put(sizes[:to_pass].cpu().contiguous()) 
+                # elif True: # 如果在同一台服务器上测试，不用处理这部分 
+                #     torch.save(compressed_data[:compress_size].cpu().contiguous(), "../dataset/compressed_data.pt")
+                #     torch.save(sizes[:to_pass].cpu().contiguous(), "../dataset/sizes.pt")
                 print(f"Tree Traversal[{frame_index}] end.") 
-        # cameras_future.close()
-        # cameras_past.close()
-        # gc.collect()
+        # cameras_queue.close() 
+        # gc.collect() 
         # torch.cuda.empty_cache()
         end_signal.wait()
-        print("quit tree traversal.")
-# 测试“各部分的延迟” 
-# 做算法上的加速
+        print("quit tree traversal.") 
 if __name__ == "__main__":
     # Set up command line argument parser 
     parser = ArgumentParser(description="Rendering script parameters") 
@@ -330,7 +373,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=50000) 
     parser.add_argument('--client', type=int, default=1) 
     parser.add_argument('--frustum_culling', action="store_true") 
-    parser.add_argument('--tt_accelerator', action="store_true") # use tree traversal accelerator 
+    parser.add_argument('--tt_mode', type=int, default=0) 
+    parser.add_argument("--local", action="store_true")
     args = parser.parse_args(sys.argv[1:]) 
     dataset, pipe = lp.extract(args), pp.extract(args) 
     mp.set_start_method("spawn", force=True) 
@@ -349,18 +393,17 @@ if __name__ == "__main__":
         # 进程间通信: 
         parent_conn1, child_conn1 = mp.Pipe() # 通信管道 
         parent_conn2, child_conn2 = mp.Pipe() 
-        cameras_future = mp.Queue() 
-        cameras_past = mp.Queue() 
+        cameras_queue = mp.Queue() 
         tensor_queue = mp.Queue() 
         end_signal = Event() 
         ser = server(manager) 
         print(f"connect with {client_address}") 
         # 启动进程: 
-        s_receive = mp.Process(target=ser.receive, args=(end_signal, cameras_future, child_conn1, )) 
+        s_receive = mp.Process(target=ser.receive, args=(end_signal, cameras_queue, child_conn1, )) 
         s_receive.start() 
-        s_send = mp.Process(target=ser.send, args=(end_signal, tensor_queue, child_conn2, )) 
+        s_send = mp.Process(target=ser.send, args=(end_signal, tensor_queue, child_conn2, args, )) 
         s_send.start() 
-        s_tt = mp.Process(target=ser.tree_traversal, args=(end_signal, dataset, pipe, cameras_future, cameras_past, tensor_queue, args, ))
+        s_tt = mp.Process(target=ser.tree_traversal, args=(end_signal, dataset, pipe, cameras_queue, tensor_queue, args, ))
         s_tt.start() 
         send_handle(parent_conn1, client_sock.fileno(), s_receive.pid) 
         send_handle(parent_conn2, client_sock.fileno(), s_send.pid) 

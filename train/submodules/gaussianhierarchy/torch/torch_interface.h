@@ -28,11 +28,7 @@ torch::Tensor& viewpoint,
 torch::Tensor& viewdir, 
 torch::Tensor& render_indices,
 torch::Tensor& parent_indices,
-torch::Tensor& nodes_for_render_indices, 
-bool frustum_culling,
-torch::Tensor& world_view_transform,
-torch::Tensor& projection_matrix, 
-torch::Tensor& means3d);
+torch::Tensor& nodes_for_render_indices);
 
 void GetTsIndexed(
 torch::Tensor& indices,

@@ -195,7 +195,7 @@ def render_post(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-        
+    
     if render_indices.size(0) != 0:
         render_inds = render_indices.long()
         if interp_python:
@@ -220,7 +220,7 @@ def render_post(
             if pc.skybox_points == 0:
                 skybox_inds = torch.Tensor([]).long()
             else:
-                skybox_inds = torch.arange(pc._xyz.size(0) - pc.skybox_points, pc._xyz.size(0)-1, device="cuda").long()
+                skybox_inds = torch.range(pc._xyz.size(0) - pc.skybox_points, pc._xyz.size(0)-1, device="cuda").long()
 
             means3D = torch.cat((means3D_base, means3D[skybox_inds])).contiguous()  
             shs = torch.cat((shs_base, shs[skybox_inds])).contiguous() 

@@ -1,10 +1,9 @@
-PROJECT_DIR=/data/zliu/webGS 
-DATA_DIR=/data/zliu/h_3dgs/small_city
-IMAGE_NAME=webgs
-IMAGE_VERSION=v0
-IMAGE_NEXT_VERSION=v1
-GPU_INDEX=2
-CONTAINER=zliu_webGS_render_${GPU_INDEX}
+DATA_DIR=/data/zliu/small_city 
+PROJECT_DIR=/data/zliu/voyager 
+IMAGE_NAME=voyager 
+IMAGE_VERSION=h3dgs 
+GPU_INDEX=2 
+CONTAINER=voyager_${GPU_INDEX} 
 
 docker run -it --rm \
     --ulimit memlock=-1:-1 \
@@ -16,9 +15,12 @@ docker run -it --rm \
     ${IMAGE_NAME}:${IMAGE_VERSION} bash 
 
 # docker commit ${CONTAINER} IMAGE_NAME:${IMAGE_NEXT_VERSION} 
-
 # First try:
 # nvcc --version
 # conda env list
 # conda activate 3dgs
 # python -c "import torch; print(torch.cuda.is_available())"
+
+# sudo nvidia-smi -i 3 -pl 100 # 300
+# sudo nvidia-smi -i 3 -lgc 1300,1300
+# sudo nvidia-smi -rgc 

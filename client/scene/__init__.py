@@ -20,9 +20,7 @@ from utils.camera_utils import camera_to_JSON, CameraDataset
 from utils.system_utils import mkdir_p
 
 class Scene:
-
     gaussians : GaussianModel
-
     def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], create_from_hier=False):
         """b
         :param path: Path to colmap scene main folder.

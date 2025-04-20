@@ -21,7 +21,7 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from gaussian_hierarchy._C import load_hierarchy, write_hierarchy
+from flash_tree_traversal._C import load_hierarchy, write_hierarchy
 from scene.OurAdam import Adam
 
 class GaussianModel:
