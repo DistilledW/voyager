@@ -41,7 +41,6 @@ class GaussianModel:
         self.inverse_opacity_activation = inverse_sigmoid
 
         self.rotation_activation = torch.nn.functional.normalize
-
     def __init__(self, sh_degree : int):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
@@ -64,7 +63,6 @@ class GaussianModel:
         self.skybox_points = 0
         self.skybox_locked = True
         self.setup_functions()
-
     def capture(self):
         return (
             self.active_sh_degree,
@@ -135,8 +133,6 @@ class GaussianModel:
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
-
-
     def create_from_pcd(
             self, 
             pcd : BasicPointCloud, 
@@ -253,7 +249,6 @@ class GaussianModel:
         exposure = torch.eye(3, 4, device="cuda")[None].repeat(len(cam_infos), 1, 1)
         self._exposure = nn.Parameter(exposure.requires_grad_(True))
         print("Number of points at initialisation : ", self._xyz.shape[0])
-
     def training_setup(self, training_args, our_adam=True):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -279,8 +274,6 @@ class GaussianModel:
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
         self.exposure_scheduler_args = get_expon_lr_func(training_args.exposure_lr_init, training_args.exposure_lr_final, lr_delay_steps=training_args.exposure_lr_delay_steps, lr_delay_mult=training_args.exposure_lr_delay_mult, max_steps=training_args.iterations)
-
-       
     def load_ply_file(self, path, degree):
         plydata = PlyData.read(path)
 
@@ -315,15 +308,10 @@ class GaussianModel:
             rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
         return xyz, features_dc, features_extra, opacities, scales, rots
-
-
     def create_from_hier(self, path, spatial_lr_scale : float, scaffold_file : str):
         self.spatial_lr_scale = spatial_lr_scale
-
         xyz, shs_all, alpha, scales, rots, nodes, boxes = load_hierarchy(path)
-
         base = os.path.dirname(path)
-
         try:
             with open(os.path.join(base, "anchors.bin"), mode='rb') as f:
                 bytes = f.read()
@@ -334,13 +322,11 @@ class GaussianModel:
         except:
             print("WARNING: NO ANCHORS FOUND")
             self.anchors = torch.Tensor([]).long()
-
-        #retrieve exposure
+        # retrieve exposure
         exposure_file = os.path.join(base, "exposure.json")
         if os.path.exists(exposure_file):
             with open(exposure_file, "r") as f:
-                exposures = json.load(f)
-
+                exposures = json.load(f) 
             self.pretrained_exposures = {image_name: torch.FloatTensor(exposures[image_name]).requires_grad_(False).cuda() for image_name in exposures}
         else:
             print(f"No exposure to be loaded at {exposure_file}")
@@ -356,7 +342,6 @@ class GaussianModel:
             opacities_scaffold = torch.from_numpy(opacities_scaffold).float()
             scales_scaffold = torch.from_numpy(scales_scaffold).float()
             rots_scaffold = torch.from_numpy(rots_scaffold).float()
-
             with open(scaffold_file + "/pc_info.txt") as f:
                     skybox_points = int(f.readline())
 
@@ -383,12 +368,9 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.cuda().requires_grad_(True))
         self._rotation = nn.Parameter(rots.cuda().requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-
         self.opacity_activation = torch.abs
         self.inverse_opacity_activation = torch.abs
-
         self.hierarchy_path = path
-
         self.nodes = nodes.cuda()
         self.boxes = boxes.cuda()
 
@@ -480,8 +462,6 @@ class GaussianModel:
             f.write(opacity.numpy().tobytes())
             f.write(scaling.numpy().tobytes())
             f.write(rotation.numpy().tobytes())
-
-
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
 

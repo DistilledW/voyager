@@ -18,7 +18,7 @@
 #include <string>
 
 // cloud functions 
-auto reorder_nodes(int N, int *, float *, int* ) -> int;
+auto reorder_nodes(int N, int *, float *, int* , int*) -> int;
 std::tuple<int, float> flashTreeTraversal( 
     int N,
     int* nodes,
@@ -33,47 +33,29 @@ std::tuple<int, float> flashTreeTraversal(
     int* least_recently, 
     int* render_indices,
     int* node_indices,
-    int* num_siblings, 
     int mode 
 );
 
-std::tuple<int, float> transimissionCompress(
-    // input parameters
-    int N, 
-    int* render_indices,
-    int* node_indices,
-    int* num_siblings, 
-    // initial data
-    float* means3D, 
-    float* opacities,
-    float* rotations,
-    float* scales,
-    float* shs,
-    float* boxes,
-    // output 
-    uint8_t* data_to_pass,
-    uint8_t* sizes,
-    float opacity_min, float inv_range 
-);
 // client functions 
 auto subGraphTreeInit( 
-    int N, 
-    uint8_t* compressed_data, 
-    uint8_t* sizes,
-    int* nodes, 
-    float* means3D,
-    float* opacities,
-    float* rotations,
-    float* scales,
-    float* shs,
-    float* boxes,
-    int* num_siblings,
-    float opacity_min, float range_255 
+    int     N, 
+    int*    indices_cur,
+    float*  features_cur,
+    float*  shs_cur, 
+    int*    starts,
+    float*  means3D,
+    float*  opacities,
+    float*  rotations,
+    float*  scales,
+    float*  shs,
+    float*  boxes,
+    int*    back_pointer 
 ) -> int;
 
 std::tuple<int, float> subGraphTreeExpand(
     int N, 
-    int* nodes, 
+    int* starts, 
+    int* parents, 
     int tree_height, 
     int* depth_count,
     float* means3D,
@@ -87,17 +69,19 @@ std::tuple<int, float> subGraphTreeExpand(
     int* render_indices 
 );
 std::tuple<int, float> subGraphTreeUpdate( 
-    int N,
-    uint8_t* compressed_data,
-    uint8_t* sizes,
-    int* nodes, 
+    int N, 
+    int* indices_cur,
+    float* features_cur,
+    float* shs_cur, 
+    int* starts, 
     float* means3D,
     float* opacities,
     float* rotations,
     float* scales,
     float* shs,
     float* boxes,
-    int* num_siblings, 
-    int* least_recently, int window_size,
-    float opacity_min, float range_255, int featureMaxx
+    int* back_pointer, 
+    int* least_recently,
+    int window_size, 
+    const int featureMaxx 
 );

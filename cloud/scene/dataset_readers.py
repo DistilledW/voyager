@@ -178,45 +178,10 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffhold=None):
-    try:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
-        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    except:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
-        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
-
-    depth_params_file = os.path.join(path, "sparse/0", "depth_params.json")
-    ## if depth_params_file isnt there AND depths file is here -> throw error
-    depths_params = None
-    if depths != "":
-        try:
-            with open(depth_params_file, "r") as f:
-                depths_params = json.load(f)
-            all_scales = np.array([depths_params[key]["scale"] for key in depths_params])
-            if (all_scales > 0).sum():
-                med_scale = np.median(all_scales[all_scales > 0])
-            else:
-                med_scale = 0
-            for key in depths_params:
-                depths_params[key]["med_scale"] = med_scale
-
-        except FileNotFoundError:
-            print(f"Error: depth_params.json file not found at path '{depth_params_file}'.")
-            sys.exit(1)
-        except Exception as e:
-            print(f"An unexpected error occurred when trying to open depth_params.json file: {e}")
-            sys.exit(1)
-
-
+def readColmapSceneInfo(path): 
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
     txt_path = os.path.join(path, "sparse/0/points3D.txt")
-    
     try:
         xyz_path = os.path.join(path, "sparse/0/xyz.pt")
         rgb_path = os.path.join(path, "sparse/0/rgb.pt")
@@ -228,46 +193,10 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
                 xyz, rgb, _ = read_points3D_binary(bin_path)
             except:
                 xyz, rgb, _ = read_points3D_text(txt_path)
-            storePly(ply_path, xyz, rgb)
-        pcd = fetchPly(ply_path)
-
-    if eval:
-        if "360" in path:
-            llffhold = 8
-        if llffhold:
-            print("------------LLFF HOLD-------------")
-            cam_names = [cam_extrinsics[cam_id].name for cam_id in cam_extrinsics]
-            cam_names = sorted(cam_names)
-            test_cam_names_list = [name for idx, name in enumerate(cam_names) if idx % llffhold == 0]
-        else:
-            with open(os.path.join(path, "sparse/0", "test.txt"), 'r') as file:
-                test_cam_names_list = [line.strip() for line in file]
-    else:
-        test_cam_names_list = []
-    # print(test_cam_names_list)
-    reading_dir = "images" if images == None else images
-    masks_reading_dir = masks if masks == "" else os.path.join(path, masks)
-
-    cam_infos_unsorted = readColmapCameras(
-        cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, depths_params=depths_params, 
-        images_folder=os.path.join(path, reading_dir), masks_folder=masks_reading_dir,
-        depths_folder=os.path.join(path, depths) if depths != "" else "", test_cam_names_list=test_cam_names_list)
-    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
-
-    train_cam_infos = [c for c in cam_infos if train_test_exp or not c.is_test]
-    test_cam_infos = [c for c in cam_infos if c.is_test]
-    print(len(test_cam_infos), "test images")
-    print(len(train_cam_infos), "train images")
-    # print(train_cam_infos[0])
-    nerf_normalization = getNerfppNorm(train_cam_infos)
-
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path)
-    return scene_info
-
+            storePly(ply_path, xyz, rgb) 
+        pcd = fetchPly(ply_path) 
+    scene_info = SceneInfo(point_cloud=pcd, train_cameras=[], test_cameras=[], nerf_normalization = {}, ply_path=ply_path) 
+    return scene_info 
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo

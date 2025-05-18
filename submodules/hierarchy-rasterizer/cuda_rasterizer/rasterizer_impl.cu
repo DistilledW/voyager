@@ -422,6 +422,7 @@ std::tuple<int, std::vector<float>> CudaRasterizer::Rasterizer::forward(
 	cudaEventRecord(end);
 	cudaEventSynchronize(end);
 	cudaEventElapsedTime(&elapse, start, end);
+
 	elapse_breakdown.push_back(elapse);
 
 	return std::make_tuple(*num_rendered, elapse_breakdown);

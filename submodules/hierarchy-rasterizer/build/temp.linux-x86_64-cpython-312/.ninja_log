@@ -1,0 +1,8 @@
+# ninja log v5
+0	5236	1745546821056253684	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/backward.o	e6a7a270df5b6ffe
+1	5245	1745546821066254247	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/forward.o	b421450440d6412e
+1	13134	1745546828944698026	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	7871b88a7dd8df8c
+2	20723	1745546836525124622	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/ext.o	f745fd19c14a92a1
+2	58289	1745546874069231942	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/rasterize_points.o	6cda1e96c0a472ea
+789	15221	1745549209753316336	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	7871b88a7dd8df8c
+33	12142	1745551102057775919	/workspace/code/submodules/hierarchy-rasterizer/build/temp.linux-x86_64-cpython-312/cuda_rasterizer/rasterizer_impl.o	7871b88a7dd8df8c

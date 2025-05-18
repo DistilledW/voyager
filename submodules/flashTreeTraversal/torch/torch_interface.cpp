@@ -55,12 +55,13 @@ void WriteHierarchy(std::string filename, torch::Tensor& pos, torch::Tensor& shs
 }
 
 // cloud functions 
-int ReorderNodes(torch::Tensor &nodes, torch::Tensor &boxes, torch::Tensor& depth_count) {
+int ReorderNodes(torch::Tensor &nodes, torch::Tensor &boxes, torch::Tensor& depth_count, torch::Tensor& parents) {
     return reorder_nodes(
         nodes.size(0), 
 		nodes.contiguous().data_ptr<int>(), 
 		boxes.contiguous().data_ptr<float>(), 
-        depth_count.contiguous().data_ptr<int>() 
+        depth_count.contiguous().data_ptr<int>(), 
+		parents.contiguous().data_ptr<int>() 
     );
 }
 std::tuple<int, float> FlashTreeTraversal( 
@@ -76,12 +77,11 @@ std::tuple<int, float> FlashTreeTraversal(
 	torch::Tensor& least_recently, 
 	torch::Tensor& render_indices,
 	torch::Tensor& node_indices,
-	torch::Tensor& num_siblings,
 	int mode
 ) { 
     return flashTreeTraversal(
         nodes.size(0), 
-		nodes.contiguous().data_ptr<int>(),
+		nodes.contiguous().data_ptr<int>(), 
 		boxes.contiguous().data_ptr<float>(), 
         means3D.contiguous().data_ptr<float>(), 
 		target_size, 
@@ -93,80 +93,43 @@ std::tuple<int, float> FlashTreeTraversal(
 		least_recently.contiguous().data_ptr<int>(),  
 		render_indices.contiguous().data_ptr<int>(),
 		node_indices.contiguous().data_ptr<int>(),
-		num_siblings.contiguous().data_ptr<int>(),
 		mode 
     );
 } 
 
-std::tuple<int, float>  TransimissionCompress( 
-	// input parameters
-	int N,
-	torch::Tensor& render_indices, 
-	torch::Tensor& node_indices, 
-	torch::Tensor& num_siblings, 
-	// initial data
-	torch::Tensor& means3D, 
-	torch::Tensor& opacities,
-	torch::Tensor& rotations,
-	torch::Tensor& scales,
-	torch::Tensor& shs,
-	torch::Tensor& boxes,
-	// output 
-	torch::Tensor& data_to_pass,
-	torch::Tensor& sizes,
-	float opacity_min, float inv_range 
-){
-	return transimissionCompress(
-		// input parameters 
-		N, 
-		render_indices.contiguous().data_ptr<int>(),
-		node_indices.contiguous().data_ptr<int>(),
-		num_siblings.contiguous().data_ptr<int>(),
-		// initial data
-		means3D.contiguous().data_ptr<float>(),
-		opacities.contiguous().data_ptr<float>(),
-		rotations.contiguous().data_ptr<float>(),
-		scales.contiguous().data_ptr<float>(),
-		shs.contiguous().data_ptr<float>(),
-		boxes.contiguous().data_ptr<float>(),
-		// output 
-		data_to_pass.contiguous().data_ptr<uint8_t>(),
-		sizes.contiguous().data_ptr<uint8_t>(),
-		opacity_min, inv_range 
-	);
-}
-
 // client 
 int SubGraphTreeInit(
-	torch::Tensor& compressed_data,
-	torch::Tensor& sizes,
-	torch::Tensor& nodes,
+	int 	N,
+	torch::Tensor& indices_cur,
+	torch::Tensor& features_cur,
+	torch::Tensor& shs_cur,
+	torch::Tensor& starts,
 	torch::Tensor& means3D,
 	torch::Tensor& opacities,
 	torch::Tensor& rotations,
 	torch::Tensor& scales,
 	torch::Tensor& shs,
 	torch::Tensor& boxes,
-	torch::Tensor& num_siblings, 
-	float opacity_min, float range_255 
+	torch::Tensor& back_pointer 
 ){
 	return subGraphTreeInit(
-		sizes.size(0),
-		compressed_data.contiguous().data_ptr<uint8_t>(),
-		sizes.contiguous().data_ptr<uint8_t>(),
-		nodes.contiguous().data_ptr<int>(), 
+		N, 
+		indices_cur.contiguous().data_ptr<int>(), 
+		features_cur.contiguous().data_ptr<float>(), 
+		shs_cur.contiguous().data_ptr<float>(), 
+		starts.contiguous().data_ptr<int>(), 
 		means3D.contiguous().data_ptr<float>(),
 		opacities.contiguous().data_ptr<float>(),
 		rotations.contiguous().data_ptr<float>(),
 		scales.contiguous().data_ptr<float>(),
 		shs.contiguous().data_ptr<float>(),
 		boxes.contiguous().data_ptr<float>(),
-		num_siblings.contiguous().data_ptr<int>(),
-		opacity_min, range_255 
+		back_pointer.contiguous().data_ptr<int>()
 	);
 }
 std::tuple<int, float> SubGraphTreeExpand(
-	torch::Tensor& nodes,
+	torch::Tensor& starts, 
+	torch::Tensor& parents, 
 	torch::Tensor& depth_count,
 	torch::Tensor& means3D, 
 	torch::Tensor& boxes, 
@@ -179,8 +142,9 @@ std::tuple<int, float> SubGraphTreeExpand(
 	torch::Tensor& render_indices 
 ) { 
 	return subGraphTreeExpand(  
-		nodes.size(0), 
-		nodes.contiguous().data_ptr<int>(), 
+		starts.size(0), 
+		starts.contiguous().data_ptr<int>(), 
+		parents.contiguous().data_ptr<int>(),
 		depth_count.size(0), 
 		depth_count.contiguous().data_ptr<int>(),
 		means3D.contiguous().data_ptr<float>(),
@@ -195,32 +159,36 @@ std::tuple<int, float> SubGraphTreeExpand(
     );
 }
 std::tuple<int, float> SubGraphTreeUpdate( 
-	torch::Tensor& compressed_data,
-	torch::Tensor& sizes,
-	torch::Tensor& nodes,
+	int N, 
+	torch::Tensor& indices_cur,
+	torch::Tensor& features_cur,
+	torch::Tensor& shs_cur, 
+	torch::Tensor& starts,
 	torch::Tensor& means3D,
 	torch::Tensor& opacities,
 	torch::Tensor& rotations,
 	torch::Tensor& scales,
 	torch::Tensor& shs,
 	torch::Tensor& boxes,
-	torch::Tensor& num_siblings,
-	torch::Tensor& least_recently, int window_size, 
-	float opacity_min, float range_255, int featureMaxx 
+	torch::Tensor& back_pointer,
+	torch::Tensor& least_recently, 
+	int window_size, 
+	const int featureMaxx 
 ){
 	return subGraphTreeUpdate(
-		sizes.size(0), 
-		compressed_data.contiguous().data_ptr<uint8_t>(),
-		sizes.contiguous().data_ptr<uint8_t>(),
-		nodes.contiguous().data_ptr<int>(),
+		N, 
+		indices_cur.contiguous().data_ptr<int>(),
+		features_cur.contiguous().data_ptr<float>(),
+		shs_cur.contiguous().data_ptr<float>(),
+		starts.contiguous().data_ptr<int>(),
 		means3D.contiguous().data_ptr<float>(),
 		opacities.contiguous().data_ptr<float>(),
 		rotations.contiguous().data_ptr<float>(),
 		scales.contiguous().data_ptr<float>(),
 		shs.contiguous().data_ptr<float>(),
 		boxes.contiguous().data_ptr<float>(),
-		num_siblings.contiguous().data_ptr<int>(),
+		back_pointer.contiguous().data_ptr<int>(), 
 		least_recently.contiguous().data_ptr<int>(), 
-		window_size, opacity_min, range_255, featureMaxx 
+		window_size, featureMaxx 
 	);
 }

@@ -17,7 +17,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("write_hierarchy", &WriteHierarchy);
     m.def("reorder_nodes", &ReorderNodes);
     m.def("flash_tree_traversal", &FlashTreeTraversal);
-    m.def("transimission_compress", &TransimissionCompress);
     m.def("subgraph_tree_init", &SubGraphTreeInit);
     m.def("subgraph_expand", &SubGraphTreeExpand); 
     m.def("subgraph_update", &SubGraphTreeUpdate);
