@@ -11,11 +11,12 @@
 
 import torch
 import math
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from fast_hier import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
-from diff_gaussian_rasterization import _C
 import numpy as np
+import zlib, io
+from einops import reduce
 
 def render(
         viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, indices = None, use_trained_exp=False):
@@ -134,12 +135,10 @@ def render(
             "visibility_filter" : vis_filter.nonzero().flatten().long(),
             "radii": radii[subfilter]}
 
-
 def render_post(
-        viewpoint_camera, 
         pc : GaussianModel, 
         pipe, 
-        bg_color : torch.Tensor, # 0 0 0
+        bg_color : torch.Tensor, 
         scaling_modifier = 1.0, 
         override_color = None, 
         render_indices = torch.Tensor([]).int(),
@@ -147,7 +146,12 @@ def render_post(
         interpolation_weights = torch.Tensor([]).float(),
         num_node_kids = torch.Tensor([]).int(),
         interp_python = True,
-        use_trained_exp = False):
+        use_trained_exp = False,
+        use_compress=False,
+        shs_vq=None,
+        viewpoint_camera=None,
+        viewpoint=None, 
+        settings=None): 
     """
     Render the scene from a hierarchy.  
     Background tensor (bg_color) must be on GPU!
@@ -160,10 +164,14 @@ def render_post(
         pass
 
     # Set up rasterization configuration
-    tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
-    tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
+    if viewpoint is not None and settings is not None:
+        tanfovx = math.tan(settings["FoVx"] * 0.5) 
+        tanfovy = math.tan(settings["FoVy"] * 0.5)
+    else:
+        tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
+        tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
-    means3D = pc.get_xyz
+    means3D = pc.get_xyz 
     means2D = screenspace_points
     opacity = pc.get_opacity
 
@@ -193,7 +201,6 @@ def render_post(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    
     if render_indices.size(0) != 0:
         render_inds = render_indices.long()
         if interp_python:
@@ -230,44 +237,101 @@ def render_post(
             interpolation_weights = interpolation_weights.clone().detach()
             interpolation_weights[num_entries:num_entries+pc.skybox_points] = 1.0 
             num_node_kids[num_entries:num_entries+pc.skybox_points] = 1 
-        
         else:
-            means3D = means3D[render_inds].contiguous()
-            means2D = means2D[render_inds].contiguous()
-            shs = shs[render_inds].contiguous()
-            opacity = opacity[render_inds].contiguous()
-            scales = scales[render_inds].contiguous()
-            rotations = rotations[render_inds].contiguous() 
+            num_entries = render_indices.size(0)
+            if pc.skybox_points == 0:
+                skybox_inds = torch.Tensor([]).long()
+            else:
+                skybox_inds = torch.range(pc._xyz.size(0) - pc.skybox_points, pc._xyz.size(0)-1, device="cuda").long()
 
+            means3D = torch.cat((means3D[render_inds], means3D[skybox_inds])).contiguous()  
+            shs = torch.cat((shs[render_inds], shs[skybox_inds])).contiguous() 
+            opacity = torch.cat((opacity[render_inds], opacity[skybox_inds])).contiguous()  
+            rotations = torch.cat((rotations[render_inds], rotations[skybox_inds])).contiguous()    
+            means2D = means2D[:(num_entries + pc.skybox_points)].contiguous()     
+            scales = torch.cat((scales[render_inds], scales[skybox_inds])).contiguous()  
+            # means3D = means3D[render_inds].contiguous()
+            # means2D = means2D[render_inds].contiguous()
+            # shs = shs[render_inds].contiguous()
+            # opacity = opacity[render_inds].contiguous()
+            # scales = scales[render_inds].contiguous()
+            # rotations = opacity[render_inds].contiguous() 
         render_indices = torch.Tensor([]).int()
         parent_indices = torch.Tensor([]).int()
-        
-    raster_settings = GaussianRasterizationSettings(
-        image_height=int(viewpoint_camera.image_height),
-        image_width=int(viewpoint_camera.image_width),
-        tanfovx=tanfovx,
-        tanfovy=tanfovy,
-        bg=bg_color,
-        scale_modifier=scaling_modifier,
-        viewmatrix=viewpoint_camera.world_view_transform,
-        projmatrix=viewpoint_camera.full_proj_transform,
-        sh_degree=pc.active_sh_degree,
-        campos=viewpoint_camera.camera_center,
-        prefiltered=False,
-        debug=pipe.debug,
-        
-        render_indices=render_indices,
-        parent_indices=parent_indices,
-        interpolation_weights=interpolation_weights,
-        num_node_kids=num_node_kids,
-        do_depth=False
-    )
+    if viewpoint is not None and settings is not None:
+        raster_settings = GaussianRasterizationSettings(
+            image_height=int(settings["image_height"]),
+            image_width=int(settings["image_width"]), 
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint.world_view_transform,
+            projmatrix=viewpoint.full_proj_transform,
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint.camera_center,
+            prefiltered=False,
+            debug=pipe.debug,
+            render_indices=render_indices,
+            parent_indices=parent_indices,
+            interpolation_weights=interpolation_weights,
+            num_node_kids=num_node_kids,
+            do_depth=False
+        ) 
+    else:
+        raster_settings = GaussianRasterizationSettings(
+            image_height=int(viewpoint_camera.image_height),
+            image_width=int(viewpoint_camera.image_width),
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint_camera.camera_center,
+            prefiltered=False,
+            debug=pipe.debug,
+            render_indices=render_indices,
+            parent_indices=parent_indices,
+            interpolation_weights=interpolation_weights,
+            num_node_kids=num_node_kids,
+            do_depth=False
+        )
 
+    if use_compress:
+        # compress
+        features_bytes  = torch.cat((
+            means3D, 
+            opacity, 
+            rotations, 
+            scales 
+        ), dim=1).cpu().numpy().tobytes() 
+        features_bytes  = zlib.compress(features_bytes) 
+        _, indices, _   = shs_vq(shs.view(-1, 48))
+        buffer = io.BytesIO() 
+        torch.save(indices.cpu(), buffer) 
+        buffer.seek(0) 
+        shs_bytes = buffer.read() 
+        shs_bytes       = zlib.compress(shs_bytes) 
+        # decompress 
+        features_bytes  = zlib.decompress(features_bytes)
+        features    = torch.from_numpy((np.frombuffer(features_bytes, dtype=np.float32)).reshape((-1, 11)).copy()).cuda()
+        means3D     = features[:, :3]
+        opacity     = features[:, 3:4]
+        rotations   = features[:, 4:8]
+        scales      = features[:, 8:11]
+        
+        shs_bytes       = zlib.decompress(shs_bytes) 
+        buffer   = io.BytesIO(shs_bytes) 
+        shs_indices = torch.load(buffer).cuda() 
+        codes    = shs_vq.get_codes_from_indices(shs_indices.reshape(-1, 1, 6)) 
+        shs      = shs_vq.project_out(reduce(codes, 'q ... -> ...', 'sum')).squeeze(1).reshape(-1, 16, 3) 
+        
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-
-    rendered_image, radii, _ = rasterizer(
+    rendered_image, num_render, elapse, elapse_breakdown  = rasterizer(
         means3D = means3D,
-        means2D = means2D,
+        means2D = torch.Tensor([]).float(), 
         shs = shs,
         colors_precomp = colors_precomp,
         opacities = opacity,
@@ -275,22 +339,19 @@ def render_post(
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
     
-    if use_trained_exp and pc.pretrained_exposures:
+    if use_trained_exp and pc.pretrained_exposures and settings is None:
         try:
             exposure = pc.pretrained_exposures[viewpoint_camera.image_name]
             rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
         except Exception as e:
             print(f"Exposures should be optimized in single. Missing exposure for image {viewpoint_camera.image_name}")
-    rendered_image = rendered_image.clamp(0, 1)
+    rendered_image = rendered_image.clamp(0, 1) 
     
-    vis_filter = radii > 0
-
-    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
-    # They will be excluded from value updates used in the splitting criteria.
     return {"render": rendered_image,
             "viewspace_points": screenspace_points,
-            "visibility_filter" : vis_filter,
-            "radii": radii[vis_filter]}
+            "num_render" : num_render,
+            "elapse": elapse,
+            "elapse_breakdown" : elapse_breakdown} 
 
 def render_coarse(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, zfar=0.0, override_color = None, indices = None):
     """
@@ -386,6 +447,8 @@ def render_coarse(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.T
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
+    
+
     
     subfilter = radii > 0
     if indices is not None:

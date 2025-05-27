@@ -1,6 +1,0 @@
-# ninja log v5
-2	1608	1747472976209492544	/workspace/code/submodules/flashTreeTraversal/build/temp.linux-x86_64-cpython-312/hierarchy_writer.o	170c99a7d5dab519
-1	1805	1747472976406502976	/workspace/code/submodules/flashTreeTraversal/build/temp.linux-x86_64-cpython-312/hierarchy_loader.o	4e8e052d555f4349
-1	8278	1747472982860844695	/workspace/code/submodules/flashTreeTraversal/build/temp.linux-x86_64-cpython-312/flash_tree_traversal.o	ca54497cc1787067
-0	18193	1747472992766368861	/workspace/code/submodules/flashTreeTraversal/build/temp.linux-x86_64-cpython-312/ext.o	89441a554c4f9c2e
-2	18513	1747472993087385843	/workspace/code/submodules/flashTreeTraversal/build/temp.linux-x86_64-cpython-312/torch/torch_interface.o	a50e6e0a801f3819

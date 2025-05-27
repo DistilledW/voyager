@@ -41,7 +41,7 @@ class client_Camera:
 
 class server:
     def __init__(self, manager):
-        self.shared_data = manager.dict({
+        self.shared_data = manager.dict({ 
             "tau": 6.0,
             "window_size" : int(10),
             "FoVx" : 0.0,
@@ -141,13 +141,12 @@ class server:
             end_signal.set() 
         if (self.sendOne(connection, compressed = queue.get(), mode=0, buffer_size=buffer_size) < 0):
             end_signal.set() 
-        if args.local:
-            if (self.sendOne(connection, intData = queue.get(), mode=1, buffer_size=buffer_size) < 0):
-                end_signal.set() # skybox number 
-            for _ in range(5): # means3D, opacity, rotations, scales, shs 
-                if (self.sendOne(connection, compressed=queue.get(), mode=0, buffer_size=buffer_size) < 0):
-                    end_signal.set() 
-        print("Send initialization is ok!") 
+        if (self.sendOne(connection, intData = queue.get(), mode=1, buffer_size=buffer_size) < 0):
+            end_signal.set() # skybox number 
+        for _ in range(5): # means3D, opacity, rotations, scales, shs 
+            if (self.sendOne(connection, compressed=queue.get(), mode=0, buffer_size=buffer_size) < 0):
+                end_signal.set() 
+        # print("Send initialization is ok!") 
         while not end_signal.is_set(): 
             try:
                 # viewpoint = None 
@@ -169,13 +168,10 @@ class server:
             except Exception as e:
                 print("Send exception: ", e)
                 end_signal.set()
-                break
-        # queue.close()
-        # gc.collect()
-        # torch.cuda.empty_cache()
-        end_signal.wait()
+                break 
+        end_signal.wait() 
         print("Quit send.")
-    def Compress(self, N, render_indices, node_indices, scene, shs_vq, queue):
+    def Compress(self, N, render_indices, node_indices, scene, shs_vq, queue, first_trail=False, args=None):
         means3D     = scene.gaussians.get_xyz 
         opacities   = scene.gaussians.get_opacity 
         rotations   = scene.gaussians.get_rotation 
@@ -193,15 +189,19 @@ class server:
             rotations[render_indices], 
             scales[render_indices], 
             boxes[node_indices].view(N, 8)[:, :7] 
-        ), dim=1).cpu().numpy().tobytes()
+        ), dim=1).to(torch.float16).cpu().numpy().tobytes() 
 
         shs_32          = shs[render_indices].view(N, -1) 
-        _, indices, _   = shs_vq(shs_32) 
+        if first_trail:
+            _, indices_1, _   = shs_vq(shs_32[:N//2]) 
+            _, indices_2, _   = shs_vq(shs_32[N//2:]) 
+            indices = torch.cat([indices_1, indices_2], dim=0) 
+        else:
+            _, indices, _   = shs_vq(shs_32) 
         buffer = io.BytesIO() 
         torch.save(indices.cpu(), buffer) 
         buffer.seek(0) 
         shs_bytes = buffer.read() 
-
         indices_bytes   = zlib.compress(node_indices.cpu().numpy().tobytes() ) 
         features_bytes  = zlib.compress(features_bytes) 
         shs_bytes       = zlib.compress(shs_bytes) 
@@ -214,9 +214,10 @@ class server:
         queue.put(indices_bytes) 
         queue.put(features_bytes) 
         queue.put(shs_bytes) 
-        base_size       = (3 * 4 + 3 + 1 + 4 + 3 + 4 * 2 + 7 + 16 * 3) * 4 
-        compress_rate   = (len(indices_bytes) + len(features_bytes) + len(shs_bytes)) / (base_size * N) 
-        return compress_rate, elapsed_time_ms 
+        base_size       = (4 + 3 + 1 + 4 + 3 + 4 * 2 + 7 + 16 * 3) * 4 
+        compress_size   = len(indices_bytes) + len(features_bytes) + len(shs_bytes)
+        compress_rate   = compress_size / (base_size * N) 
+        return compress_rate, compress_size, elapsed_time_ms 
 
     @torch.no_grad() 
     def tree_traversal(self, end_signal, dataset, cameras_queue, queue, args):
@@ -233,29 +234,28 @@ class server:
         shs         = scene.gaussians.get_features 
 
         point_number    = means3D.size(0) 
-        least_recently  = torch.full((point_number, ), 100, dtype = torch.int).cuda() # last visit 
+        least_recently  = torch.full((point_number, ), 100, dtype = torch.int).cuda() 
         render_indices  = torch.zeros(point_number, dtype = torch.int).cuda() 
         node_indices    = torch.zeros(point_number, dtype = torch.int).cuda() 
         parent          = torch.full((scene.gaussians.nodes.size(0), ), -1, dtype = torch.int).cuda()
-
         depth_count = torch.zeros(100, dtype=torch.int).cpu() 
         shs_vq = ResidualVQ( 
-            dim=48,
-            codebook_size=256,
-            num_quantizers=self.rvq_num,
-            commitment_weight=0.0,
-            kmeans_init=True,
-            kmeans_iters=10,
-            ema_update=False,
+            dim=48, 
+            codebook_size=64, 
+            num_quantizers=self.rvq_num, 
+            commitment_weight=0.0, 
+            kmeans_init=True, 
+            kmeans_iters=10, 
+            ema_update=False, 
             learnable_codebook=True 
         ).cuda() 
         with torch.no_grad():
-            _, _, _ = shs_vq(shs[::4].view(-1, 48)) # initialize shs_vq 
+            _, _, _ = shs_vq(shs[::16].view(-1, 48)) # initialize shs_vq 
         state_dict = shs_vq.state_dict() 
         buf = io.BytesIO() 
         torch.save(state_dict, buf) 
         buf.seek(0) 
-
+        
         torch.cuda.empty_cache() 
         tree_height = reorder_nodes( 
             scene.gaussians.nodes, 
@@ -270,21 +270,22 @@ class server:
         queue.put(zlib.compress(parent.cpu().numpy().tobytes()))
         queue.put(zlib.compress(buf.read())) 
         # skybox 
-        if args.local:
-            if scene.gaussians.skybox_points == 0:
-                skybox_inds = torch.Tensor([]).long()
-            else:
-                skybox_inds = torch.arange(point_number - scene.gaussians.skybox_points, point_number, device="cuda").long()
-            queue.put(scene.gaussians.skybox_points) 
-            queue.put(zlib.compress(means3D[skybox_inds].cpu().numpy().tobytes())) 
-            queue.put(zlib.compress(opacities[skybox_inds].cpu().numpy().tobytes())) 
-            queue.put(zlib.compress(rotations[skybox_inds].cpu().numpy().tobytes())) 
-            queue.put(zlib.compress(scales[skybox_inds].cpu().numpy().tobytes())) 
-            queue.put(zlib.compress(shs[skybox_inds].cpu().numpy().tobytes())) 
+        if scene.gaussians.skybox_points == 0:
+            skybox_inds = torch.Tensor([]).long()
+        else:
+            skybox_inds = torch.arange(point_number - scene.gaussians.skybox_points, point_number, device="cuda").long()
+        queue.put(scene.gaussians.skybox_points) 
+        queue.put(zlib.compress(means3D[skybox_inds].cpu().numpy().tobytes())) 
+        queue.put(zlib.compress(opacities[skybox_inds].cpu().numpy().tobytes())) 
+        queue.put(zlib.compress(rotations[skybox_inds].cpu().numpy().tobytes())) 
+        queue.put(zlib.compress(scales[skybox_inds].cpu().numpy().tobytes())) 
+        queue.put(zlib.compress(shs[skybox_inds].cpu().numpy().tobytes())) 
         frame_index = 0 
         print("tree traversal process start!", flush=True) 
-        with open(args.log_file, "w")as fout:
+        with open(f"{args.log_file}/point_number.txt", "w")as fout:
             pass 
+        # with open(args.log_file, "w")as fout:
+        #     pass 
         while not end_signal.is_set():
             viewpoint = None 
             try:
@@ -302,6 +303,7 @@ class server:
                 tanfovx = math.tan(self.shared_data["FoVx"] * 0.5) 
                 target_size = (2 * (self.shared_data["tau"]  + 0.5)) * tanfovx / (0.5 * self.shared_data["image_width"]) 
                 print("flash_tree_traversal", flush=True) 
+
                 to_pass, ftt_elapse = flash_tree_traversal( 
                     scene.gaussians.nodes, 
                     scene.gaussians.boxes, 
@@ -310,7 +312,7 @@ class server:
                     viewpoint.camera_center, 
                     viewpoint.world_view_transform, 
                     viewpoint.projection_matrix, 
-                    args.frustum_culling, 
+                    True, 
                     self.shared_data["window_size"], 
                     least_recently, 
                     render_indices, 
@@ -318,10 +320,14 @@ class server:
                     # degrees, 
                     args.tt_mode 
                 ) 
-                # print(f"idx = {frame_index}, to pass = ", to_pass, ftt_elapse, flush=True)
-                compress_rate, tc_elapse = self.Compress( 
-                    to_pass, render_indices, node_indices, scene, shs_vq, queue 
+                
+                print(f"idx = {frame_index}, to pass = ", to_pass, ftt_elapse, flush=True)
+                compress_rate, compress_size, tc_elapse = self.Compress( 
+                    to_pass, render_indices, node_indices, scene, shs_vq, queue, frame_index==1 
                 ) 
+                with open(f"{args.log_file}/point_number.txt", "a+")as fout:
+                    fout.write(f"{compress_size * 30 / self.shared_data["window_size"]/1024.0/1024.0:.5f}\n") 
+
                 # print(compress_rate, tc_elapse) 
                 # with open(args.log_file, "a+")as fout:
                 #     compress_rate = compress_size * 100.0 / (to_pass * 270) 
@@ -342,10 +348,8 @@ if __name__ == "__main__":
     parser.add_argument('--ip', type=str, default="127.0.0.1") 
     parser.add_argument('--port', type=int, default=50000) 
     parser.add_argument('--client', type=int, default=1) 
-    parser.add_argument('--frustum_culling', action="store_true") 
     parser.add_argument('--tt_mode', type=int, default=0) 
     parser.add_argument('--log_file', type=str, default="") 
-    parser.add_argument("--local", action="store_true")
     args = parser.parse_args(sys.argv[1:]) 
     dataset = lp.extract(args) 
     mp.set_start_method("spawn", force=True) 

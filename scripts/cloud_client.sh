@@ -22,7 +22,7 @@ for vgg_file in "${VGG_FILES[@]}"; do
     fi 
 done 
 
-TYPE=$1 # cloud or client
+TYPE=$1 # cloud or client 
 DATASET=$2 
 scene=$3 
 if [ "$DATASET" = "360" ]; then # 4946 * 3286 
@@ -60,63 +60,58 @@ else
 fi 
 
 PROJECT="/workspace/code"
-DATASET="/workspace/data/${scene}"
-ALIGNED="${DATASET}/camera_calibration/aligned"
-RECTIFIED="${DATASET}/camera_calibration/rectified"
-MODLE_PATH="${DATASET}/h_3dgs/scaffold"
-MERGED_HIER="${DATASET}/h_3dgs/merged.hier"
-LOGS_DIR="${PROJECT}/dataset/logs/$TYPE/$DATASET/$scene/" 
-# LOGS_DIR="${PROJECT}/dataset/logs/$TYPE/${DATASET}/${scene}/accuracy" 
+DATASET_PATH="/workspace/data/${scene}"
+ALIGNED="${DATASET_PATH}/camera_calibration/aligned"
+RECTIFIED="${DATASET_PATH}/camera_calibration/rectified"
+MODLE_PATH="${DATASET_PATH}/h_3dgs/scaffold"
+MERGED_HIER="${DATASET_PATH}/h_3dgs/merged.hier"
+LOGS_DIR="${PROJECT}/dataset/logs/$TYPE" 
 mkdir -p "${LOGS_DIR}" 
 if [ "$TYPE" = "cloud" ]; then 
     SOURCES=("${PROJECT}/submodules/flashTreeTraversal/" "${PROJECT}/submodules/simple-knn/") 
     TARGETS=("flash_tree_traversal" "simple_knn") 
-    TT_MODE=$4 # Fused = 0, Default = 1, LayerWise = 2 
+    TT_MODE=0 
     ARGS=( 
         --source_path "${ALIGNED}"
         --model_path "${MODLE_PATH}"
         --scaffold_file "${MODLE_PATH}/point_cloud/iteration_30000"
         --hierarchy "${MERGED_HIER}" 
-        --log_file "${LOGS_DIR}/${TT_MODE}" 
+        --log_file "${LOGS_DIR}" 
         --tt_mode "${TT_MODE}" 
         --client 1 
     ) 
 elif [ "$TYPE" = "client" ]; then 
-    VIEWPOINT_PATH="${PROJECT}/dataset/viewpoints_all.txt" 
     SOURCES=("${PROJECT}/submodules/flashTreeTraversal/" "${PROJECT}/submodules/fast_hier/")
     TARGETS=("flash_tree_traversal" "fast_hier") 
     TAU=$4 
-    RENDERS="${LOGS_DIR}/renders" 
-    mkdir -p "${RENDERS}/${TAU}" 
-    mkdir -p "$LOGS_DIR/vq/"
+    # RENDERS="${LOGS_DIR}/renders" 
+    # RENDERS="/workspace/code/dataset/cc_videos"
+    # mkdir -p "${RENDERS}/${TAU}" 
     ARGS=( 
         --images "${RECTIFIED}/images" 
         --alpha_masks "${RECTIFIED}/masks" 
-        --viewpointFilePath "${VIEWPOINT_PATH}" 
-        --log_file "$LOGS_DIR/vq/test_tt.txt" 
-        --out_dir "${RENDERS}/${TAU}" 
+        --log_file "$LOGS_DIR" 
+        # --out_dir "${RENDERS}/${TAU}" 
         --resolution "${resolution}" 
         --tau "${TAU}" 
-        --eval 
-        --train_test_exp 
+        --window_size "$5" 
+        # --eval --train_test_exp 
     ) 
 else 
     echo "Select type: cloud or client" 
     exit 0 
 fi 
-REBUILD=1 
+REBUILD=0 
 for i in "${!TARGETS[@]}"; do 
-    SOURCE="${SOURCES[$i]}"
-    PACKAGE="${TARGETS[$i]}"
+    SOURCE="${SOURCES[$i]}" 
+    PACKAGE="${TARGETS[$i]}" 
     if [ "${REBUILD}" -eq 1 ] || ! pip show "$PACKAGE" > /dev/null 2>&1; then 
         pip install "$SOURCE"
     fi 
 done 
 SHARED_ARGS=( 
     --ip "127.0.0.1" 
-    --port 60000 
-    --frustum_culling 
-    --local 
+    --port 40000 
 ) 
 CODE="$PROJECT/$TYPE" 
 PYTHON_FILE="$TYPE.py" 
@@ -124,4 +119,4 @@ cd ${CODE}
 python ${PYTHON_FILE} "${SHARED_ARGS[@]}" "${ARGS[@]}" 
 
 # bash cloud_client.sh cloud small_city . 0 
-# bash cloud_client.sh client small_city . 6.0 
+# bash cloud_client.sh client small_city . 15.0 32 

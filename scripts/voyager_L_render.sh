@@ -23,10 +23,10 @@ for vgg_file in "${VGG_FILES[@]}"; do
 done 
 
 DATASET=$1 
-SEQ=$2
-SETS=$3
+SEQ=$2 
+SETS=$3 
 ALPHA_MASKS_ARGS=()
-if [ "$DATASET" = "360" ]; then # 4946 * 3286 
+if [ "$DATASET" = "360" ]; then # 4946 * 3286     # 
     # if [ "$SETS" = "0" ]; then
     #     SCENES=("bicycle" "bonsai" "counter" "garden") 
     # elif [ "$SETS" = "1" ]; then
@@ -45,7 +45,6 @@ elif [ "$DATASET" = "MegaNeRF" ]; then # 4608 * 3456
         SCENES=("building" "rubble") #
     fi 
     resolution=4 
-    
     for scene in "${SCENES[@]}" 
     do 
         ln -s /workspace/data/${scene}/train/images /workspace/data/${scene}/images 
@@ -53,10 +52,11 @@ elif [ "$DATASET" = "MegaNeRF" ]; then # 4608 * 3456
 elif [ "${DATASET}" = "small_city" ]; then # 1024 * 690 
     SCENES=(".") 
     resolution=1 
+    # Taus=(0.0) 
     ALPHA_MASKS_ARGS=(
         --alpha_masks /workspace/data/camera_calibration/rectified/masks 
     )
-elif [ "$DATASET" = "UrbanScene3D" ]; then # 5472 * 3648  
+elif [ "$DATASET" = "UrbanScene3D" ]; then # 5472 * 3648 
     if [ "$SETS" = "0" ]; then
         SCENES=("sciArt") 
     elif [ "$SETS" = "1" ]; then
@@ -70,7 +70,8 @@ elif [ "$DATASET" = "UrbanScene3D" ]; then # 5472 * 3648
         ln -s /workspace/data/${scene}/train/images /workspace/data/${scene}/images 
     done 
 elif [ "$DATASET" = "Tanks_Templates" ]; then # 960 * 545 
-    SCENES=("train" "truck") 
+    SCENES=("truck") # "train"
+    Taus=(0.0 3.0 6.0 15.0) # 
     resolution=1 
 elif [ "$DATASET" = "DeepBlending" ]; then # 1328 * 864
     SCENES=("DrJohnson" "Playroom") 
@@ -89,25 +90,28 @@ elif [ "$DATASET" = "campus" ]; then # 1435 * 1077
     # SCENES=("campus_part_0" "campus_part_1") 
     resolution=1 
 else 
-    SCENES=("DrJohnson" "Playroom") 
+    SCENES=("") 
     resolution=1 
 fi 
 
-SOURCES=("/workspace/code/submodules/hierarchy-rasterizer" "/workspace/code/submodules/gaussianhierarchy" "/workspace/code/submodules/simple-knn")
-TARGETS=("diff_gaussian_rasterization" "gaussian_hierarchy" "simple_knn") 
-REBUILD=0 
+PROJECT="/workspace/code"
+SOURCES=("${PROJECT}/submodules/flashLocal/" "${PROJECT}/submodules/simple-knn/" "${PROJECT}/submodules/fast_hier/") 
+TARGETS=("flash_tree_traversal" "simple_knn" "fast_hier") 
+REBUILD=1 
 for i in "${!TARGETS[@]}"; do 
     SOURCE="${SOURCES[$i]}"
     PACKAGE="${TARGETS[$i]}"
     if [ "${REBUILD}" -eq 1 ] || ! pip show "$PACKAGE" > /dev/null 2>&1; then 
         pip install "$SOURCE"
-    fi
+    fi 
 done 
 
-CODE="/workspace/code/h3dgs_render"
+CODE="${PROJECT}/local_test"
 cd ${CODE} 
-Taus=(3.0 15.0) # 0.0 3.0 6.0 15.0
+Taus=(3.0 15.0) #  3.0 6.0 15.0 
 PYTHON_FILE="render_hierarchy.py" 
+
+# 运行一组程序 
 for scene in "${SCENES[@]}"; 
 do 
     DATASET_PATH="/workspace/data/${scene}"
@@ -115,19 +119,19 @@ do
     RECTIFIED="${DATASET_PATH}/camera_calibration/rectified"
     MODLE_PATH="${DATASET_PATH}/h_3dgs/scaffold"
     MERGED_HIER="${DATASET_PATH}/h_3dgs/merged.hier"
-    CAMERA_DIR="${ALIGNED}/sparse/0/tests/$SEQ"
-    mkdir -p "${CAMERA_DIR}" 
+    # CAMERA_DIR="${ALIGNED}/sparse/0/tests/$SEQ"
+    # mkdir -p "${CAMERA_DIR}" 
     ARGS=( 
         --source_path "${ALIGNED}"
         --model_path "${MODLE_PATH}"
         --scaffold_file "${MODLE_PATH}/point_cloud/iteration_30000"
         --hierarchy "${MERGED_HIER}" 
         --images "${DATASET_PATH}/images" 
-        # --alpha_masks "${RECTIFIED}/masks" 
         --resolution "${resolution}" 
-        --eval
+        --eval --compress --train_test_exp
     ) 
-    # LOGS_DIR="/workspace/code/dataset/logs/h3dgs_render/${DATASET}/${scene}/performance"
+    # LOGS_DIR="${PROJECT}/dataset/logs/compress/${DATASET}/${scene}/performance"
+    # mkdir -p "${LOGS_DIR}" 
     # for tau in "${Taus[@]}"; 
     # do 
     #     python ${PYTHON_FILE} \
@@ -136,18 +140,25 @@ do
     #         --per --test "$seq.txt" \
     #         "${ARGS[@]}" 
     # done 
-    LOGS_DIR="/workspace/code/dataset/logs/h3dgs_render/${DATASET}/${scene}/performance/$SEQ"
-    mkdir -p "${LOGS_DIR}" 
+    # LOGS_DIR="/workspace/code/dataset/logs/compress/${DATASET}/${scene}/performance/$SEQ"
+    # mkdir -p "${LOGS_DIR}" 
+    # for tau in "${Taus[@]}"; 
+    # do 
+    #     python ${PYTHON_FILE} --taus ${tau} \
+    #         --log_file "${LOGS_DIR}/${tau}.txt" \
+    #         --res_file "${LOGS_DIR}/res_${tau}.txt" \
+    #         --path --cameras_dir "${CAMERA_DIR}" --test "$SEQ.txt" \
+    #         "${ARGS[@]}" "${ALPHA_MASKS_ARGS[@]}" 
+    # done 
+    # LOGS_DIR="${PROJECT}/dataset/logs/compress/${DATASET}/${scene}/accuracy" 
+    # RENDERS="${PROJECT}/dataset/logs/compress/${DATASET}/${scene}/renders" 
     for tau in "${Taus[@]}"; 
     do 
-        python ${PYTHON_FILE} --taus ${tau} \
-            --log_file "${LOGS_DIR}/${tau}.txt" \
-            --res_file "${LOGS_DIR}/res_${tau}.txt" \
-            --cameras_dir "${CAMERA_DIR}" --test "$SEQ.txt" \
-            "${ARGS[@]}" "${ALPHA_MASKS_ARGS[@]}" --out_dir /workspace/code/dataset/$tau
+        python ${PYTHON_FILE} \
+            --taus ${tau} \
+            --test "$SEQ.txt" \
+            "${ARGS[@]}" "${ALPHA_MASKS_ARGS[@]}" --out_dir /workspace/code/dataset/voyager-R/$tau
     done 
-    # LOGS_DIR="/workspace/code/dataset/logs/h3dgs_render/${DATASET}/${scene}/accuracy" --path 
-    # RENDERS="/workspace/code/dataset/logs/h3dgs_render/${DATASET}/${scene}/renders" 
     # mkdir -p "${LOGS_DIR}" 
     # for tau in "${Taus[@]}"; 
     # do 
@@ -155,7 +166,7 @@ do
     #     python ${PYTHON_FILE} \
     #         --log_file "${LOGS_DIR}/${tau}.txt" \
     #         --taus ${tau} \
-    #         "${ARGS[@]}" --train_test_exp --test "$SEQ.txt" 
-    #         # --out_dir "${RENDERS}/${tau}" \
+    #         --out_dir "${RENDERS}/${tau}" --test "$SEQ.txt" \
+    #         "${ARGS[@]}" "${ALPHA_MASKS_ARGS[@]}" # --compress 
     # done 
 done 

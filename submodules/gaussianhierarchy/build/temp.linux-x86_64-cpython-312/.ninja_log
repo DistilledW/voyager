@@ -1,7 +1,0 @@
-# ninja log v5
-2	1719	1745546882593709178	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/traversal.o	9500439592afe952
-1	1939	1745546882813721490	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/hierarchy_writer.o	a26ab350c2d67c98
-0	2122	1745546882996731731	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/hierarchy_loader.o	eb649540a805e367
-1	8382	1745546889238080853	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/runtime_switching.o	5beee3c0d6263959
-0	18308	1745546899157635245	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/ext.o	fab6e843394fb05c
-2	19054	1745546899920677866	/workspace/code/submodules/gaussianhierarchy/build/temp.linux-x86_64-cpython-312/torch/torch_interface.o	8c05265250dfe67
