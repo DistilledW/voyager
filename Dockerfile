@@ -55,7 +55,8 @@ RUN conda init bash
 RUN conda create -n 3dgs python=3.12 -y
 RUN conda run -n 3dgs pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 RUN conda run -n 3dgs pip install plyfile tqdm joblib exif scikit-learn timm==0.4.5 opencv-python==4.9.0.80 gradio_imageslider gradio==4.29.0 matplotlib
-WORKDIR /workspace
+RUN conda run -n 3dgs pip install vector-quantize-pytorch 
+WORKDIR /workspace 
 
 RUN apt-get update && apt-get install -y tree inetutils-ping
     && apt-get install -y net-tools \

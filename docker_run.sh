@@ -6,7 +6,7 @@ PROJECT_DIR=/data/zliu/voyager
 IMAGE_NAME=voyager 
 IMAGE_VERSION=h3dgs 
 CONTAINER=voyager_${SCENES}_${TAGS}_${GPU_INDEX} 
-
+        
 docker run -it --rm --detach-keys="ctrl-x" \
     --ulimit memlock=-1:-1 --shm-size=16g \
     --gpus device=${GPU_INDEX} \

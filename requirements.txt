@@ -1,0 +1,16 @@
+pyyaml
+typeguard
+torch==2.4.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+torchvision
+torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+plyfile
+tqdm
+joblib
+exif
+scikit-learn
+timm==0.4.5
+opencv-python>=4.8,<4.9
+gradio_imageslider
+gradio==4.29.0
+matplotlib
+vector-quantize-pytorch

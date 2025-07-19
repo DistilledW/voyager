@@ -139,14 +139,17 @@ class client:
         }) 
         self.rvq_num = 6 
         self.parameter_number = 3
-    def send(self, end_signal, render_isOk, receive_isOk, camera_queue, child_con, viewpointFilePath, buffer_size=10240): 
+    def send(self, end_signal, render_isOk, receive_isOk, camera_queue, child_con, viewpointFilePath, buffer_size=10240, n_frames=1): 
         fd = recv_handle(child_con) 
         connection = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) 
-        with open("/workspace/code/dataset/bandwidth/camera_poses.json", "r")as fin:
+        with open("../dataset/camera_poses/bandwidth/camera_poses.json", "r")as fin:
             camera_poses = json.load(fin)  
         camera_poses = dict(sorted(camera_poses.items())) 
-        with open("/workspace/code/dataset/bandwidth/setting.json", "r") as f:
+        with open("../dataset/camera_poses/bandwidth/setting.json", "r") as f:
             settings = json.load(f) 
+        settings["image_width"] = 3840 
+        settings["image_height"] = 2160 
+        
         R_pre = None 
         T_pre = None 
         Rs = [] 
@@ -163,10 +166,8 @@ class client:
             key_times = [0, 1] 
             key_rots = R.from_matrix([R_pre, R_cur])
             slerp = Slerp(key_times, key_rots) 
-            # n_f = set_frames[idx-1] if n_frames == -1 else 
-            n_f = 15 
-            for i in range(1, n_f):
-                t = i / n_f 
+            for i in range(1, n_frames):
+                t = i / n_frames 
                 R_mid = slerp([t])[0].as_matrix() 
                 T_mid = (1 - t) * T_pre + t * T_cur 
                 Rs.append(R_mid) 
@@ -385,14 +386,14 @@ class client:
         #     print(f"Create folder {args.out_dir}.") 
         # with open(args.log_file, "w")as fout:
         #     pass 
-        # if args.train_test_exp and os.path.exists(os.path.join("/workspace/data/h_3dgs/exposure.json")): 
-        #     with open("/workspace/data/h_3dgs/exposure.json", "r") as f:
-        #         exposures = json.load(f) 
-        #     pretrained_exposures = {image_name: torch.FloatTensor(exposures[image_name]).requires_grad_(False).cuda() for image_name in exposures}
-        # else:
-        #     pretrained_exposures = None 
-        with open(f"{args.log_file}/elapse.txt", "w")as fout:
-            pass 
+        if args.train_test_exp and os.path.exists(os.path.join("/data/voyager/small_city/h_3dgs/exposure.json")): 
+            with open("/data/voyager/small_city/h_3dgs/exposure.json", "r") as f:
+                exposures = json.load(f) 
+            pretrained_exposures = {image_name: torch.FloatTensor(exposures[image_name]).requires_grad_(False).cuda() for image_name in exposures}
+        else:
+            pretrained_exposures = None 
+        # with open(f"{args.log_file}/elapse.txt", "w")as fout:
+        #     pass 
         while not end_signal.is_set(): 
             viewpoint = None 
             try:
@@ -409,8 +410,6 @@ class client:
             except Exception as e:
                 print("Render exception[1]: ", e) 
                 break 
-            # viewpoints = generate(preview, currentview)
-            # for viewpoint in viewpoints:
             if viewpoint is None:
                 continue 
             frame_index += 1 
@@ -418,7 +417,6 @@ class client:
             update_elapse = 0 
             if frame_index % self.shared_data["window_size"] == 1:
                 indices_cur, features_cur, shs_cur, length, decom_elapse = self.Decompress(queue, shs_vq) 
-                print(indices_cur.shape, features_cur.shape, shs_cur.shape, length) 
                 print("Update tree start") 
                 featureMaxx, ud_elapse = subgraph_update( 
                     length, indices_cur, features_cur, shs_cur, 
@@ -488,8 +486,8 @@ class client:
                 scales = sca,
                 rotations = rot 
             ) 
-            with open(f"{args.log_file}/elapse.txt", "a+")as fout:
-                fout.write(f"{update_elapse:.5f}, {expand_elapse:.5f}, {elapse:.5f}\n") 
+            # with open(f"{args.log_file}/elapse.txt", "a+")as fout:
+            #     fout.write(f"{update_elapse:.5f}, {expand_elapse:.5f}, {elapse:.5f}\n") 
             # if args.train_test_exp and pretrained_exposures is not None:
             #     try:
             #         exposure = pretrained_exposures[viewpoint.image_name] 
@@ -550,6 +548,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval", action="store_true") 
     parser.add_argument("--train_test_exp", action="store_true") 
     parser.add_argument("--window_size", type=int, default=16)
+    parser.add_argument("--n_frames", type=int, default=1)
     args = parser.parse_args(sys.argv[1:]) 
     mp.set_start_method("spawn", force=True) 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
@@ -563,7 +562,7 @@ if __name__ == "__main__":
     end_signal = Event() 
     render_isOk = Event()  
     receive_isOk = Event() 
-    c_send = mp.Process(target=c.send, args=(end_signal, render_isOk, receive_isOk, camera_queue, child_conn1, args.viewpointFilePath, )) 
+    c_send = mp.Process(target=c.send, args=(end_signal, render_isOk, receive_isOk, camera_queue, child_conn1, args.viewpointFilePath, n_frames=args.n_frames)) 
     c_send.start() 
     c_receive = mp.Process(target=c.receive, args=(end_signal, receive_isOk, tensor_queue, child_conn2, args, )) 
     c_receive.start() 

@@ -326,7 +326,7 @@ class server:
                     to_pass, render_indices, node_indices, scene, shs_vq, queue, frame_index==1 
                 ) 
                 with open(f"{args.log_file}/point_number.txt", "a+")as fout:
-                    fout.write(f"{compress_size * 30 / self.shared_data["window_size"]/1024.0/1024.0:.5f}\n") 
+                    fout.write(f"{compress_size * 30 / self.shared_data['window_size']/1024.0/1024.0:.5f}\n") 
 
                 # print(compress_rate, tc_elapse) 
                 # with open(args.log_file, "a+")as fout:
