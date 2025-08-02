@@ -105,7 +105,9 @@ RasterizeGaussiansCUDA(
 		M = sh.size(1);
 	}
 	cudaEventRecord(start);
-	auto [rendered, elapse_breakdown] = CudaRasterizer::Rasterizer::forward(
+	int rendered; 
+	std::vector<float> elapse_breakdown;
+	std::tie(rendered, elapse_breakdown) = CudaRasterizer::Rasterizer::forward(
 		geomFunc, binningFunc, imgFunc,
 		P, degree, M, // 点数，颜色的degree
 		background.contiguous().data_ptr<float>(),

@@ -96,10 +96,10 @@ public:
     __host__ auto device_value() && = delete;
 
     // construct a holder from int pointer
-    __host__ static auto from_ptr(int *ptr) -> std::pair<Holder *, int *> {
-        constexpr auto off = 256 / sizeof(int);
-        return {std::launder(reinterpret_cast<Holder *>(ptr)), ptr + off};
-    }
+    // __host__ static auto from_ptr(int *ptr) -> std::pair<Holder *, int *> {
+    //     constexpr auto off = 256 / sizeof(int);
+    //     return {std::launder(reinterpret_cast<Holder *>(ptr)), ptr + off};
+    // }
 };
 
 struct Package {
